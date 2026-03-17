@@ -1,0 +1,48 @@
+name: 'Clanopy PR Review'
+description: 'AI-powered PR review using Claude Code'
+branding:
+  icon: 'eye'
+  color: 'green'
+
+inputs:
+  anthropic_api_key:
+    description: 'Anthropic API key for Claude'
+    required: true
+  config_path:
+    description: 'Path to .clanopy/review.yml'
+    required: false
+    default: '.clanopy/review.yml'
+  post_comment:
+    description: 'Post findings as PR comment'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install clanopy
+      shell: bash
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh
+
+    - name: Install Claude Code
+      shell: bash
+      run: |
+        npm install -g @anthropic-ai/claude-code
+
+    - name: Run review
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        REPO="${{ github.repository }}"
+        POST_FLAG=""
+        if [ "${{ inputs.post_comment }}" = "true" ]; then
+          POST_FLAG="--post"
+        fi
+        clanopy review "$PR_NUMBER" \
+          --repo "$REPO" \
+          --config "${{ inputs.config_path }}" \
+          $POST_FLAG

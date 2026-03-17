@@ -95,6 +95,11 @@ func Run(opts RunOptions) error {
 		Findings: findings,
 	}
 
+	// 8b. Cache result for later use by `clanopy fix`.
+	if err := SaveResult(result); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to cache review result: %v\n", err)
+	}
+
 	// 9. Format output.
 	outputFormat := opts.Output
 	if outputFormat == "" {

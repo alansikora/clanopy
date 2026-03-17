@@ -1,0 +1,18 @@
+# Example: Add this to your repo as .github/workflows/clanopy-review.yml
+name: Clanopy Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: alansikora/clanopy@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
