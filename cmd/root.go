@@ -25,8 +25,8 @@ func DisplayVersion() string {
 
 var rootCmd = &cobra.Command{
 	Use:   "clanopy",
-	Short: "Claude workspace manager",
-	Long:  "Manage multiple Claude Code workspaces with isolated sessions.",
+	Short: "The canopy over your Claude Code",
+	Long:  "Workspaces, reviews, and workflows for Claude Code.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
