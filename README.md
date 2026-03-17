@@ -1,4 +1,4 @@
-# <img width="150" alt="clanopy-icon" src="https://github.com/user-attachments/assets/dc16721e-b884-48d3-851b-1d481cb8c159" /> clanopy
+# <img width="150" alt="clanopy" src="https://github.com/user-attachments/assets/bc4a0277-e46d-44fd-8875-4e074405d470" /> clanopy
 
 
 A workspace manager for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Run multiple isolated Claude sessions — each workspace gets its own authentication, settings, and history.
