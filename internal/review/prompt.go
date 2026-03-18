@@ -9,7 +9,9 @@ import (
 func BuildPrompt(pr *PRData, cfg *ReviewConfig) string {
 	var b strings.Builder
 
-	b.WriteString("You are a code reviewer. Review the following pull request and report findings.\n\n")
+	b.WriteString("You are a code reviewer. Review the following pull request and report findings.\n")
+	b.WriteString("You will be given the full contents of changed files for context, along with the diff. Only report issues that are directly related to the changes in the diff — do not flag pre-existing issues in unchanged code.\n")
+	b.WriteString("Also consider whether the changes could cause side effects in other files that depend on or interact with the modified code (e.g. callers, importers, shared state). If you identify a potential side effect, anchor your finding to the relevant line in the diff and describe the affected downstream code in the description.\n\n")
 
 	// PR metadata.
 	fmt.Fprintf(&b, "## Pull Request #%d\n", pr.Number)
@@ -50,6 +52,9 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig) string {
 	if cfg != nil && cfg.MaxFindings > 0 {
 		fmt.Fprintf(&b, "Limit your output to at most %d findings.\n\n", cfg.MaxFindings)
 	}
+
+	// Changed file contents for full context.
+	writeFileContents(&b, pr.FileContents, pr.Files)
 
 	// Diff.
 	b.WriteString("## Diff\n```diff\n")
@@ -111,10 +116,12 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 }
 
 // BuildIncrementalPrompt reviews only new code, avoiding duplicate reports.
-func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, prNumber int) string {
+func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, prNumber int, fileContents map[string]string, files []string) string {
 	var b strings.Builder
 
-	b.WriteString("You are a code reviewer. Review ONLY the following incremental changes and report NEW findings.\n\n")
+	b.WriteString("You are a code reviewer. Review ONLY the following incremental changes and report NEW findings.\n")
+	b.WriteString("You will be given the full contents of changed files for context, along with the diff. Only report issues that are directly related to the changes in the diff — do not flag pre-existing issues in unchanged code.\n")
+	b.WriteString("Also consider whether the changes could cause side effects in other files that depend on or interact with the modified code (e.g. callers, importers, shared state). If you identify a potential side effect, anchor your finding to the relevant line in the diff and describe the affected downstream code in the description.\n\n")
 
 	// Context from config.
 	if cfg != nil && cfg.Context != "" {
@@ -157,6 +164,9 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 		b.WriteString("\n")
 	}
 
+	// Changed file contents for full context.
+	writeFileContents(&b, fileContents, files)
+
 	// Incremental diff.
 	b.WriteString("## Incremental Diff\n```diff\n")
 	b.WriteString(diff)
@@ -183,4 +193,28 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 	fmt.Fprintf(&b, "    \"fix_ref\": \"%d-1\"\n  }\n]\n```\n", prNumber)
 
 	return b.String()
+}
+
+// writeFileContents adds a "Changed File Contents" section to the prompt builder.
+func writeFileContents(b *strings.Builder, fileContents map[string]string, files []string) {
+	if len(fileContents) == 0 {
+		return
+	}
+
+	b.WriteString("## Changed File Contents\n")
+	b.WriteString("Below are the full contents of changed files. Use these to understand surrounding code, types, imports, and control flow. Do NOT report findings on unchanged code — only flag issues directly related to changes in the diff.\n\n")
+
+	for _, path := range files {
+		content, ok := fileContents[path]
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(b, "### `%s`\n", path)
+		b.WriteString("```\n")
+		lines := strings.Split(content, "\n")
+		for i, line := range lines {
+			fmt.Fprintf(b, "%d: %s\n", i+1, line)
+		}
+		b.WriteString("```\n\n")
+	}
 }
