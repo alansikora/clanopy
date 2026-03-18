@@ -80,11 +80,12 @@ func (p projectItem) FilterValue() string { return filepath.Base(p.path) }
 
 // --- List builders ---
 
-const logo = ` _ _
-| | |_ __ ___  _   ___  __
-| | | '_ ` + "`" + ` _ \| | | \ \/ /
-| | | | | | | | |_| |>  <
-|_|_|_| |_| |_|\__,_/_/\_\`
+const logo = `       _
+  ___| | __ _ _ __   ___  _ __  _   _
+ / __| |/ _` + "`" + ` | '_ \ / _ \| '_ \| | | |
+| (__| | (_| | | | | (_) | |_) | |_| |
+ \___|_|\__,_|_| |_|\___/| .__/ \__, |
+                         |_|    |___/`
 
 func buildWorkspaceList(cfg *config.Config, version string, width, height int) list.Model {
 	items := make([]list.Item, len(cfg.Workspaces))
