@@ -20,7 +20,7 @@ type RepoInfo struct {
 
 // knownConfigFiles lists filenames to look for when analyzing a repo.
 var knownConfigFiles = []string{
-	"go.mod", "go.sum",
+	"go.mod",
 	"package.json", "tsconfig.json",
 	"Cargo.toml",
 	"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
