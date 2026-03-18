@@ -74,9 +74,14 @@ var reviewInitCmd = &cobra.Command{
 
 		var authEnv string
 		if useAPIKey {
-			authEnv = "          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}"
+			authEnv = "          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}"
 		} else {
-			authEnv = "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+			authEnv = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+		}
+
+		actionRef := Version
+		if !strings.HasPrefix(actionRef, "v") {
+			actionRef = "v" + actionRef
 		}
 
 		workflow := fmt.Sprintf(`name: Clanopy Review
@@ -94,24 +99,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clanopy
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Review PR
-        env:
+      - uses: alansikora/clanopy@%s
+        with:
 %s
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          clanopy review "${{ github.event.pull_request.number }}" \
-            --repo "${{ github.repository }}" \
-            --config ".clanopy/review.yml" \
-            --post
-`, authEnv)
+          config_path: .clanopy/review.yml
+`, actionRef, authEnv)
 
 		if err := os.MkdirAll(workflowDir, 0755); err != nil {
 			return fmt.Errorf("creating workflow directory: %w", err)

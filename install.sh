@@ -4,11 +4,12 @@ set -e
 REPO="alansikora/clanopy"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
-CANARY=0
-for arg in "$@"; do
-  case "$arg" in
-    --canary) CANARY=1 ;;
-    *) echo "Unknown option: $arg" >&2; exit 1 ;;
+TAG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --canary)  TAG="canary"; shift ;;
+    --version) TAG="$2"; shift 2 ;;
+    *)         echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
@@ -31,29 +32,28 @@ detect_arch() {
 OS="$(detect_os)"
 ARCH="$(detect_arch)"
 
-if [ "$CANARY" = "1" ]; then
-  echo "Fetching canary release..."
-  URL="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/canary" \
-    | grep '"browser_download_url"' \
-    | grep "_${OS}_${ARCH}\.tar\.gz" \
-    | cut -d'"' -f4)"
-  if [ -z "$URL" ]; then
-    echo "Error: could not find canary asset for ${OS}/${ARCH}" >&2
-    exit 1
-  fi
-  ARCHIVE="${URL##*/}"
-  _v="${ARCHIVE%.tar.gz}"
-  _v="${_v#clanopy_}"
-  VERSION="${_v%_${OS}_${ARCH}}"
-else
+if [ -z "$TAG" ]; then
   echo "Fetching latest release..."
   TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | grep '"tag_name"' \
     | cut -d'"' -f4)"
-  VERSION="${TAG#v}"
-  ARCHIVE="clanopy_${VERSION}_${OS}_${ARCH}.tar.gz"
-  URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE}"
 fi
+
+echo "Fetching release ${TAG}..."
+URL="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" \
+  | grep '"browser_download_url"' \
+  | grep "_${OS}_${ARCH}\.tar\.gz" \
+  | cut -d'"' -f4)"
+
+if [ -z "$URL" ]; then
+  echo "Error: could not find asset for ${OS}/${ARCH} in release ${TAG}" >&2
+  exit 1
+fi
+
+ARCHIVE="${URL##*/}"
+_v="${ARCHIVE%.tar.gz}"
+_v="${_v#clanopy_}"
+VERSION="${_v%_${OS}_${ARCH}}"
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
