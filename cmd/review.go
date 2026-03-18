@@ -12,8 +12,9 @@ var reviewCmd = &cobra.Command{
 	Use:   "review <pr-number>",
 	Short: "Review a pull request using Claude",
 	Args: cobra.ArbitraryArgs,
-	// TraverseChildren lets cobra route subcommands (e.g. "generate", "init")
-	// before falling through to RunE for PR number arguments.
+	// TraverseChildren causes cobra to use Traverse instead of Find when
+	// resolving the command tree, which correctly parses persistent flags
+	// across subcommand boundaries (e.g. "review --dry-run generate").
 	TraverseChildren: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
