@@ -262,10 +262,10 @@ func parseGeneratedConfig(output string) (string, error) {
 	}
 
 	// Inject missing version as a string prefix to preserve comments.
-	// Only prepend when the key is truly absent — if it's explicitly set
-	// to 0, replacing via string would create a duplicate key.
 	if cfg.Version == 0 && !strings.Contains(raw, "version:") {
 		raw = "version: 1\n" + raw
+	} else if cfg.Version != 1 {
+		return "", fmt.Errorf("unsupported config version: %d", cfg.Version)
 	}
 
 	return strings.TrimSpace(raw), nil
