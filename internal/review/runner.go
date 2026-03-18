@@ -57,16 +57,15 @@ func runClaude(prompt string, env []string) ([]byte, error) {
 
 // parseFixedRefs extracts fix_ref strings from Claude's JSON response.
 func parseFixedRefs(output string) []string {
-	matches := jsonFenceRe.FindStringSubmatch(output)
-	if matches == nil {
-		return nil
+	allMatches := jsonFenceRe.FindAllStringSubmatch(output, -1)
+	for _, matches := range allMatches {
+		var refs []string
+		if err := json.Unmarshal([]byte(matches[1]), &refs); err != nil {
+			continue
+		}
+		return refs
 	}
-
-	var refs []string
-	if err := json.Unmarshal([]byte(matches[1]), &refs); err != nil {
-		return nil
-	}
-	return refs
+	return nil
 }
 
 // allResolved checks if all clanopy threads have been resolved.

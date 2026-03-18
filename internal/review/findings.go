@@ -31,19 +31,25 @@ type ReviewResult struct {
 var jsonFenceRe = regexp.MustCompile("(?s)```json\\s*\n(.*?)```")
 
 // ParseFindings extracts findings from Claude's output by looking for a JSON
-// array inside a ```json code fence.
+// array inside a ```json code fence. It tries all matches in case an earlier
+// fence contains non-JSON content (e.g. a code example).
 func ParseFindings(output string) ([]Finding, error) {
-	matches := jsonFenceRe.FindStringSubmatch(output)
-	if matches == nil {
-		return nil, fmt.Errorf("no ```json code fence found in output")
+	allMatches := jsonFenceRe.FindAllStringSubmatch(output, -1)
+	if len(allMatches) == 0 {
+		return nil, fmt.Errorf("no ```json code fence found in output:\n%s", output)
 	}
 
-	raw := matches[1]
-
-	var findings []Finding
-	if err := json.Unmarshal([]byte(raw), &findings); err != nil {
-		return nil, fmt.Errorf("parsing findings JSON: %w", err)
+	// Try each match — the actual findings array may not be the first fence.
+	var lastErr error
+	for _, matches := range allMatches {
+		raw := matches[1]
+		var findings []Finding
+		if err := json.Unmarshal([]byte(raw), &findings); err != nil {
+			lastErr = err
+			continue
+		}
+		return findings, nil
 	}
 
-	return findings, nil
+	return nil, fmt.Errorf("parsing findings JSON: %w\nClaude output:\n%s", lastErr, output)
 }
