@@ -34,7 +34,7 @@ jobs:
 
       - name: Stamp action.yml for canary
         run: |
-          sed -i 's|install.sh | sh|install.sh | sh -s -- --canary|' action.yml
+          sed -i 's#install.sh | sh#install.sh | sh -s -- --canary#' action.yml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add action.yml
