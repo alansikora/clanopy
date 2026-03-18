@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/alansikora/clanopy/internal/config"
 )
 
 // RunOptions configures a review run.
@@ -70,14 +72,27 @@ func Run(opts RunOptions) error {
 
 	// 6. Run Claude.
 	claudeCmd := exec.Command("claude", "--print", "--no-session-persistence", prompt)
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		claudeCmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY="+apiKey)
+	env := os.Environ()
+	// Resolve workspace config dir if not already set, so Claude uses the
+	// correct auth credentials (the shell wrapper normally does this).
+	if os.Getenv("CLAUDE_CONFIG_DIR") == "" {
+		cfg, err := config.Load()
+		if err == nil {
+			cwd, _ := os.Getwd()
+			if ws, _, err := cfg.FindWorkspaceForDir(cwd); err == nil {
+				env = setEnv(env, "CLAUDE_CONFIG_DIR", config.SessionDir(ws.Name))
+				if ws.APIKey != "" {
+					env = setEnv(env, "ANTHROPIC_API_KEY", ws.APIKey)
+				}
+			}
+		}
 	}
+	claudeCmd.Env = env
 	claudeOutput, err := claudeCmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return fmt.Errorf("claude exited with status %d: %s", exitErr.ExitCode(), string(exitErr.Stderr))
+			return fmt.Errorf("claude failed: %s\n%s", string(exitErr.Stderr), string(claudeOutput))
 		}
 		return fmt.Errorf("running claude: %w", err)
 	}
@@ -134,4 +149,15 @@ func Run(opts RunOptions) error {
 	}
 
 	return nil
+}
+
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
