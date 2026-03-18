@@ -190,7 +190,11 @@ func Run(opts RunOptions) error {
 							label = firstLine
 						}
 						if err := ResolveThread(t.ID); err != nil {
-							fmt.Fprintf(os.Stderr, "  ✗ %s — failed to resolve: %v\n", label, err)
+							if strings.Contains(err.Error(), "Resource not accessible") {
+								fmt.Fprintf(os.Stderr, "  ~ %s — fixed (auto-resolve unavailable: token lacks permission)\n", label)
+							} else {
+								fmt.Fprintf(os.Stderr, "  ! %s — fixed, but failed to resolve thread: %v\n", label, err)
+							}
 						} else {
 							fmt.Fprintf(os.Stderr, "  ✓ %s — resolved\n", label)
 						}

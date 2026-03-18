@@ -145,7 +145,11 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Or use an API key instead:
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional: enables auto-resolving fixed review threads (see below)
+          github_token: ${{ secrets.CLANOPY_GH_PAT_TOKEN || github.token }}
 ```
+
+> **Auto-resolving review threads:** When clanopy detects a finding has been fixed, it tries to resolve the GitHub review thread automatically. The default `GITHUB_TOKEN` may not have permission for this. To enable it, create a [Fine-grained PAT](https://github.com/settings/personal-access-tokens) with **Pull requests: Read and write** permission, add it as a repo secret named `CLANOPY_GH_PAT_TOKEN`, and uncomment the `github_token` line above.
 
 ### Fix workflow
 
