@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 // RunOptions configures a review run.
@@ -69,9 +68,8 @@ func Run(opts RunOptions) error {
 		return nil
 	}
 
-	// 6. Run Claude — pipe prompt via stdin to avoid OS arg length limits.
-	claudeCmd := exec.Command("claude", "--print")
-	claudeCmd.Stdin = strings.NewReader(prompt)
+	// 6. Run Claude.
+	claudeCmd := exec.Command("claude", "--print", "--no-session-persistence", prompt)
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
 		claudeCmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY="+apiKey)
 	}
