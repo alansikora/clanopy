@@ -43,11 +43,12 @@ jobs:
           git tag -f canary
           git push -f origin canary
 
+          STAMPED_SHA="$(git rev-parse HEAD)"
           gh release delete canary --yes 2>/dev/null || true
           gh release create canary dist/*.tar.gz dist/checksums.txt \
             --title "Canary ($(git rev-parse --short HEAD~1))" \
             --notes "Latest build from \`main\` — commit $(git rev-parse --short HEAD~1). Not a stable release." \
             --prerelease \
-            --target canary
+            --target "$STAMPED_SHA"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
