@@ -89,6 +89,36 @@ func PostComment(repo string, number int, body string) error {
 	return nil
 }
 
+// FetchReviewFromPR extracts cached review data from a PR comment's hidden HTML tag.
+func FetchReviewFromPR(repo string, prNumber int) (*ReviewResult, error) {
+	numStr := fmt.Sprintf("%d", prNumber)
+	out, err := exec.Command("gh", "pr", "view", numStr,
+		"--repo", repo,
+		"--json", "comments",
+		"--jq", ".comments[].body",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("fetching PR comments: %w", err)
+	}
+
+	// Look for <!-- clanopy:review {...} --> in comments.
+	const prefix = "<!-- clanopy:review "
+	const suffix = " -->"
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) && strings.HasSuffix(line, suffix) {
+			jsonData := line[len(prefix) : len(line)-len(suffix)]
+			var result ReviewResult
+			if err := json.Unmarshal([]byte(jsonData), &result); err != nil {
+				continue
+			}
+			return &result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no clanopy review data found in PR #%d comments", prNumber)
+}
+
 // DetectRepo gets owner/name from the current git remote.
 func DetectRepo() (string, error) {
 	out, err := exec.Command("gh", "repo", "view",

@@ -75,6 +75,12 @@ func FormatMarkdown(result *ReviewResult) string {
 		}
 	}
 
+	// Embed review data as hidden HTML comment for `clanopy fix` to extract.
+	jsonData, err := json.Marshal(result)
+	if err == nil {
+		fmt.Fprintf(&b, "\n<!-- clanopy:review %s -->\n", string(jsonData))
+	}
+
 	return b.String()
 }
 

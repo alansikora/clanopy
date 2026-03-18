@@ -28,10 +28,20 @@ var fixCmd = &cobra.Command{
 			return err
 		}
 
-		// 2. Load cached review result.
+		// 2. Load review result: try local cache first, then fetch from PR comment.
 		result, err := review.LoadLatestResult(prNumber)
 		if err != nil {
-			return fmt.Errorf("loading review result: %w", err)
+			repo, repoErr := review.DetectRepo()
+			if repoErr != nil {
+				return fmt.Errorf("no local cache and could not detect repo: %w", repoErr)
+			}
+			fmt.Fprintf(os.Stderr, "No local cache, fetching review from PR #%d...\n", prNumber)
+			result, err = review.FetchReviewFromPR(repo, prNumber)
+			if err != nil {
+				return fmt.Errorf("loading review result: %w", err)
+			}
+			// Cache it locally for next time.
+			review.SaveResult(result)
 		}
 
 		// 3. Find the finding by matching fix_ref.
