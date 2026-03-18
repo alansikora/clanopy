@@ -23,7 +23,7 @@ var fixCmd = &cobra.Command{
 		fixRef := args[0]
 
 		// 1. Parse fix-ref to extract PR number and finding index.
-		prNumber, findingIdx, err := parseFixRef(fixRef)
+		prNumber, _, err := parseFixRef(fixRef)
 		if err != nil {
 			return err
 		}
@@ -38,13 +38,26 @@ var fixCmd = &cobra.Command{
 		}
 
 		// 3. Find the finding by matching fix_ref.
-		finding, err := lookupFinding(result, fixRef, findingIdx)
+		// Try latest review first, then search all reviews for older fix_refs.
+		finding, err := lookupFinding(result, fixRef)
 		if err != nil && result != nil {
 			// Cache might be stale — try fetching fresh data from PR.
 			freshResult, fetchErr := fetchAndCacheReview(prNumber)
 			if fetchErr == nil {
 				result = freshResult
-				finding, err = lookupFinding(result, fixRef, findingIdx)
+				finding, err = lookupFinding(result, fixRef)
+			}
+		}
+		if err != nil {
+			// fix_ref not in the latest review — search all reviews.
+			repo, detectErr := review.DetectRepo()
+			if detectErr == nil {
+				fmt.Fprintf(os.Stderr, "Searching older reviews for %s...\n", fixRef)
+				f, fetchErr := review.FetchFindingFromPR(repo, prNumber, fixRef)
+				if fetchErr == nil {
+					finding = f
+					err = nil
+				}
 			}
 		}
 		if err != nil {
@@ -155,16 +168,13 @@ func fetchAndCacheReview(prNumber int) (*review.ReviewResult, error) {
 	return result, nil
 }
 
-func lookupFinding(result *review.ReviewResult, fixRef string, findingIdx int) (*review.Finding, error) {
+func lookupFinding(result *review.ReviewResult, fixRef string) (*review.Finding, error) {
 	for i := range result.Findings {
 		if result.Findings[i].FixRef == fixRef {
 			return &result.Findings[i], nil
 		}
 	}
-	if findingIdx < 1 || findingIdx > len(result.Findings) {
-		return nil, fmt.Errorf("finding index %d out of range (1-%d)", findingIdx, len(result.Findings))
-	}
-	return &result.Findings[findingIdx-1], nil
+	return nil, fmt.Errorf("fix_ref %q not found in review result", fixRef)
 }
 
 func parseFixRef(ref string) (prNumber, findingIdx int, err error) {

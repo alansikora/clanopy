@@ -55,27 +55,36 @@ func runClaude(prompt string, env []string) ([]byte, error) {
 	return output, nil
 }
 
-// parseFixedRefs extracts fix_ref strings from Claude's JSON response.
-func parseFixedRefs(output string) []string {
+// parseFixedThreads extracts thread ID strings (e.g. "thread-0") from Claude's
+// JSON response and returns the corresponding integer indices.
+func parseFixedThreads(output string) []int {
 	allMatches := jsonFenceRe.FindAllStringSubmatch(output, -1)
 	for _, matches := range allMatches {
 		var refs []string
 		if err := json.Unmarshal([]byte(matches[1]), &refs); err != nil {
 			continue
 		}
-		return refs
+		var indices []int
+		for _, ref := range refs {
+			var idx int
+			if _, err := fmt.Sscanf(ref, "thread-%d", &idx); err == nil {
+				indices = append(indices, idx)
+			}
+		}
+		return indices
 	}
 	return nil
 }
 
 // allResolved checks if all clanopy threads have been resolved.
-func allResolved(threads []ReviewThread, fixedRefs []string) bool {
-	fixedSet := make(map[string]bool, len(fixedRefs))
-	for _, ref := range fixedRefs {
-		fixedSet[ref] = true
+// fixedIndices are the sequential indices into the threads slice that were fixed.
+func allResolved(threads []ReviewThread, fixedIndices []int) bool {
+	fixedSet := make(map[int]bool, len(fixedIndices))
+	for _, idx := range fixedIndices {
+		fixedSet[idx] = true
 	}
-	for _, t := range threads {
-		if !fixedSet[t.FixRef] {
+	for i := range threads {
+		if !fixedSet[i] {
 			return false
 		}
 	}
@@ -134,24 +143,28 @@ func Run(opts RunOptions) error {
 
 	// Check for previous clanopy review threads.
 	threads, _ := FetchReviewThreads(repo, opts.PRNumber)
+	startIndex := len(threads) // continue fix_ref numbering after all existing threads
 	var clanopyThreads []ReviewThread
 	for _, t := range threads {
-		if !t.Resolved && t.FixRef != "" {
+		if !t.Resolved {
 			clanopyThreads = append(clanopyThreads, t)
 		}
 	}
 	previousSHA := FetchPreviousReviewSHA(repo, opts.PRNumber)
 
 	var prompt string
-	var fixedRefs []string
+	var fixedIndices []int
 	if len(clanopyThreads) > 0 && previousSHA != "" {
 		// Incremental review.
+		fmt.Fprintf(os.Stderr, "Re-reviewing PR #%d (%d unresolved threads, base %s)\n", opts.PRNumber, len(clanopyThreads), previousSHA[:8])
 		incrementalDiff, err := GetIncrementalDiff(previousSHA)
 		if err != nil {
 			// Fall back to full review.
-			prompt = BuildPrompt(pr, cfg)
+			fmt.Fprintf(os.Stderr, "Could not compute incremental diff, falling back to full review\n")
+			prompt = BuildPrompt(pr, cfg, startIndex)
 		} else {
 			// Phase 1: Re-evaluate existing findings.
+			fmt.Fprintf(os.Stderr, "Evaluating %d previous findings against new changes...\n", len(clanopyThreads))
 			reevalPrompt := BuildReevaluatePrompt(clanopyThreads, incrementalDiff)
 
 			if opts.DryRun {
@@ -160,37 +173,48 @@ func Run(opts RunOptions) error {
 			} else {
 				reevalOutput, err := runClaude(reevalPrompt, env)
 				if err == nil {
-					fixedRefs = parseFixedRefs(string(reevalOutput))
-					for _, t := range clanopyThreads {
-						for _, ref := range fixedRefs {
-							if t.FixRef == ref {
-								ResolveThread(t.ID)
-								fmt.Fprintf(os.Stderr, "Resolved: %s\n", t.FixRef)
+					fixedIndices = parseFixedThreads(string(reevalOutput))
+					fmt.Fprintf(os.Stderr, "Result: %d fixed, %d still open\n", len(fixedIndices), len(clanopyThreads)-len(fixedIndices))
+					for _, idx := range fixedIndices {
+						if idx >= 0 && idx < len(clanopyThreads) {
+							t := clanopyThreads[idx]
+							label := t.Path
+							if firstLine := t.Body; firstLine != "" {
+								if nl := strings.Index(firstLine, "\n"); nl >= 0 {
+									firstLine = firstLine[:nl]
+								}
+								label = firstLine
+							}
+							if err := ResolveThread(t.ID); err != nil {
+								fmt.Fprintf(os.Stderr, "  ✗ %s — failed to resolve: %v\n", label, err)
+							} else {
+								fmt.Fprintf(os.Stderr, "  ✓ %s — resolved\n", label)
 							}
 						}
 					}
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: re-evaluation failed: %v\n", err)
 				}
 			}
 
 			// Phase 2: Review incremental diff.
+			fixedSet := make(map[int]bool, len(fixedIndices))
+			for _, idx := range fixedIndices {
+				fixedSet[idx] = true
+			}
 			var unresolved []ReviewThread
-			for _, t := range clanopyThreads {
-				resolved := false
-				for _, ref := range fixedRefs {
-					if t.FixRef == ref {
-						resolved = true
-						break
-					}
-				}
-				if !resolved {
+			for i, t := range clanopyThreads {
+				if !fixedSet[i] {
 					unresolved = append(unresolved, t)
 				}
 			}
-			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, pr.FileContents, pr.Files)
+			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issues excluded)...\n", len(unresolved))
+			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, pr.FileContents, pr.Files)
 		}
 	} else {
 		// First review — full PR diff.
-		prompt = BuildPrompt(pr, cfg)
+		fmt.Fprintf(os.Stderr, "Reviewing PR #%d...\n", opts.PRNumber)
+		prompt = BuildPrompt(pr, cfg, startIndex)
 	}
 
 	// 5. Dry run — print prompt and return.
@@ -210,6 +234,11 @@ func Run(opts RunOptions) error {
 	if err != nil {
 		return fmt.Errorf("parsing findings: %w", err)
 	}
+	if len(findings) == 0 {
+		fmt.Fprintf(os.Stderr, "No new findings\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "Found %d new findings\n", len(findings))
+	}
 
 	// Get current HEAD SHA for tracking.
 	headSHA, _ := exec.Command("git", "rev-parse", "HEAD").Output()
@@ -224,7 +253,7 @@ func Run(opts RunOptions) error {
 
 	// Check if no new findings and we resolved everything.
 	if len(findings) == 0 && opts.Post {
-		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixedRefs) {
+		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixedIndices) {
 			PostAllClearReview(repo, opts.PRNumber)
 			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
 			return nil
