@@ -254,8 +254,10 @@ func Run(opts RunOptions) error {
 		formatted = FormatMarkdown(result)
 	}
 
-	// 10. Print to stdout.
-	fmt.Print(formatted)
+	// 10. Print to stdout (skip when posting to avoid noisy CI logs).
+	if !opts.Post {
+		fmt.Print(formatted)
+	}
 
 	// 11. Post review if requested (uses PR Review API for inline comments).
 	if opts.Post {
