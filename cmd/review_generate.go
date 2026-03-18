@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/alansikora/clanopy/internal/review"
 	"github.com/spf13/cobra"
@@ -13,7 +14,7 @@ var reviewGenerateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate a review config by analyzing the project with Claude",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		dryRun, _ := cmd.InheritedFlags().GetBool("dry-run")
 		force, _ := cmd.Flags().GetBool("force")
 
 		fmt.Fprintf(os.Stderr, "Analyzing project...\n")
@@ -34,7 +35,7 @@ var reviewGenerateCmd = &cobra.Command{
 		// Back up existing file unless --force.
 		if _, err := os.Stat(configPath); err == nil {
 			if !force {
-				bakPath := configPath + ".bak"
+				bakPath := configPath + "." + time.Now().Format("20060102-150405") + ".bak"
 				data, err := os.ReadFile(configPath)
 				if err != nil {
 					return fmt.Errorf("reading existing config for backup: %w", err)
@@ -60,7 +61,6 @@ var reviewGenerateCmd = &cobra.Command{
 }
 
 func init() {
-	reviewGenerateCmd.Flags().Bool("dry-run", false, "Print generated config without writing")
 	reviewGenerateCmd.Flags().Bool("force", false, "Overwrite existing config without backup")
 	reviewCmd.AddCommand(reviewGenerateCmd)
 }

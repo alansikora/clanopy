@@ -11,7 +11,11 @@ import (
 var reviewCmd = &cobra.Command{
 	Use:   "review <pr-number>",
 	Short: "Review a pull request using Claude",
-	Args:  cobra.ArbitraryArgs,
+	Args: cobra.ArbitraryArgs,
+	// TraverseChildren causes cobra to use Traverse instead of Find when
+	// resolving the command tree, which correctly parses persistent flags
+	// across subcommand boundaries (e.g. "review --dry-run generate").
+	TraverseChildren: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return cmd.Help()
@@ -43,6 +47,6 @@ func init() {
 	reviewCmd.Flags().StringP("output", "o", "markdown", "Output format: markdown or json")
 	reviewCmd.Flags().Bool("post", false, "Post findings as a PR comment")
 	reviewCmd.Flags().StringP("config", "c", ".clanopy/review.yml", "Path to review config")
-	reviewCmd.Flags().Bool("dry-run", false, "Show prompt without running Claude")
+	reviewCmd.PersistentFlags().Bool("dry-run", false, "Show prompt without running Claude")
 	rootCmd.AddCommand(reviewCmd)
 }
