@@ -6,7 +6,9 @@ import (
 )
 
 // BuildPrompt constructs the review prompt from PR data and review config.
-func BuildPrompt(pr *PRData, cfg *ReviewConfig) string {
+// startIndex is the number of existing findings across prior reviews so that
+// fix_ref numbering continues from where the last review left off.
+func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int) string {
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. Review the following pull request and report findings.\n")
@@ -76,24 +78,27 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig) string {
 	b.WriteString("- `title` (string): A short title for the finding.\n")
 	b.WriteString("- `description` (string): A detailed explanation of the issue.\n")
 	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement.\n")
-	fmt.Fprintf(&b, "- `fix_ref` (string): A reference ID in the format `%d-<index>` where index is 1-based (e.g. `%d-1`, `%d-2`).\n", pr.Number, pr.Number, pr.Number)
+	first := startIndex + 1
+	fmt.Fprintf(&b, "- `fix_ref` (string): A reference ID in the format `%d-<index>` where index starts at %d (e.g. `%d-%d`, `%d-%d`).\n", pr.Number, first, pr.Number, first, pr.Number, first+1)
 	b.WriteString("\nIf there are no findings, return an empty array: `[]`.\n")
 	b.WriteString("\nExample:\n```json\n[\n  {\n    \"id\": \"rule-id\",\n    \"file\": \"src/main.go\",\n    \"line\": 42,\n    \"severity\": \"warning\",\n    \"title\": \"Short title\",\n    \"description\": \"Detailed description.\",\n    \"suggestion\": \"Consider doing X instead.\",\n")
-	fmt.Fprintf(&b, "    \"fix_ref\": \"%d-1\"\n  }\n]\n```\n", pr.Number)
+	fmt.Fprintf(&b, "    \"fix_ref\": \"%d-%d\"\n  }\n]\n```\n", pr.Number, first)
 
 	return b.String()
 }
 
 // BuildReevaluatePrompt asks Claude which previous findings are now fixed.
+// Each thread is assigned a unique sequential ID (thread-0, thread-1, ...)
+// since threads span multiple review rounds and have no stable external identifier.
 func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) string {
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. You previously left findings on a pull request. The author has pushed new changes.\n\n")
 	b.WriteString("## Previous Findings\n")
-	b.WriteString("Here are the unresolved findings from the last review:\n\n")
+	b.WriteString("Here are the unresolved findings from previous reviews:\n\n")
 
-	for _, t := range threads {
-		fmt.Fprintf(&b, "- **%s** at `%s:%d`\n", t.FixRef, t.Path, t.Line)
+	for i, t := range threads {
+		fmt.Fprintf(&b, "- **thread-%d** at `%s:%d`\n", i, t.Path, t.Line)
 		// Extract the first line of the body as the severity+rule summary.
 		firstLine := t.Body
 		if idx := strings.Index(t.Body, "\n"); idx >= 0 {
@@ -108,15 +113,16 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 
 	b.WriteString("## Task\n")
 	b.WriteString("Determine which of the previous findings have been fixed by the new changes.\n\n")
-	b.WriteString("Return a JSON array of fix_ref strings for findings that are NOW FIXED inside a ```json code fence.\n")
+	b.WriteString("Return a JSON array of thread ID strings for findings that are NOW FIXED inside a ```json code fence.\n")
 	b.WriteString("If none are fixed, return an empty array: `[]`.\n\n")
-	b.WriteString("Example:\n```json\n[\"42-1\", \"42-3\"]\n```\n")
+	b.WriteString("Example:\n```json\n[\"thread-0\", \"thread-2\"]\n```\n")
 
 	return b.String()
 }
 
 // BuildIncrementalPrompt reviews only new code, avoiding duplicate reports.
-func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, prNumber int, fileContents map[string]string, files []string) string {
+// startIndex is the number of existing findings so fix_ref numbering continues.
+func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, prNumber int, startIndex int, fileContents map[string]string, files []string) string {
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. Review ONLY the following incremental changes and report NEW findings.\n")
@@ -159,7 +165,7 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 		b.WriteString("## Known Issues (DO NOT DUPLICATE)\n")
 		b.WriteString("These issues are already reported and unresolved. Do NOT report them again:\n\n")
 		for _, t := range knownIssues {
-			fmt.Fprintf(&b, "- `%s` at `%s:%d`\n", t.FixRef, t.Path, t.Line)
+			fmt.Fprintf(&b, "- `%s:%d`\n", t.Path, t.Line)
 		}
 		b.WriteString("\n")
 	}
@@ -187,10 +193,11 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 	b.WriteString("- `title` (string): A short title for the finding.\n")
 	b.WriteString("- `description` (string): A detailed explanation of the issue.\n")
 	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement.\n")
-	fmt.Fprintf(&b, "- `fix_ref` (string): A reference ID in the format `%d-<index>` where index is 1-based (e.g. `%d-1`, `%d-2`).\n", prNumber, prNumber, prNumber)
+	first := startIndex + 1
+	fmt.Fprintf(&b, "- `fix_ref` (string): A reference ID in the format `%d-<index>` where index starts at %d (e.g. `%d-%d`, `%d-%d`).\n", prNumber, first, prNumber, first, prNumber, first+1)
 	b.WriteString("\nOnly report NEW issues found in the incremental diff. If there are no new findings, return an empty array: `[]`.\n")
 	b.WriteString("\nExample:\n```json\n[\n  {\n    \"id\": \"rule-id\",\n    \"file\": \"src/main.go\",\n    \"line\": 42,\n    \"severity\": \"warning\",\n    \"title\": \"Short title\",\n    \"description\": \"Detailed description.\",\n    \"suggestion\": \"Consider doing X instead.\",\n")
-	fmt.Fprintf(&b, "    \"fix_ref\": \"%d-1\"\n  }\n]\n```\n", prNumber)
+	fmt.Fprintf(&b, "    \"fix_ref\": \"%d-%d\"\n  }\n]\n```\n", prNumber, first)
 
 	return b.String()
 }

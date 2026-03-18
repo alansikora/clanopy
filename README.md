@@ -66,6 +66,28 @@ clanopy review 42 --output json  # output as JSON
 clanopy review 42 --dry-run    # show the prompt without calling Claude
 ```
 
+### Re-reviews
+
+When reviewing a PR that already has clanopy findings, clanopy runs an incremental review:
+
+1. **Re-evaluates** existing unresolved findings against the new changes and automatically resolves threads that have been fixed
+2. **Reviews** only the incremental diff, excluding known unresolved issues to avoid duplicate reports
+3. Posts an **all clear** if every finding has been addressed and no new issues are found
+
+Progress is logged to stderr:
+
+```
+Re-reviewing PR #42 (5 unresolved threads, base a1b2c3d4)
+Evaluating 5 previous findings against new changes...
+Result: 3 fixed, 2 still open
+  ✓ 🟡 **warning** — `missing-error-handling` — resolved
+  ✓ ⚪ **nitpick** — `redundant-nesting` — resolved
+  ✓ ⚪ **nitpick** — `unclear-variable-name` — resolved
+Reviewing new changes (2 known issues excluded)...
+Found 1 new findings
+Review posted to PR #42
+```
+
 ### Review rules
 
 Add a `.clanopy/review.yml` to your repo to define review rules:

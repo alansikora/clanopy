@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -272,6 +271,53 @@ func FetchReviewFromPR(repo string, prNumber int) (*ReviewResult, error) {
 	return nil, fmt.Errorf("no clanopy review data found in PR #%d reviews", prNumber)
 }
 
+// FetchFindingFromPR searches all clanopy reviews on a PR for a specific fix_ref.
+// Unlike FetchReviewFromPR (which returns the latest review), this searches every
+// review so that fix_ref links from older review rounds still resolve correctly.
+func FetchFindingFromPR(repo string, prNumber int, fixRef string) (*Finding, error) {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid repo format %q, expected owner/name", repo)
+	}
+
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
+	out, err := exec.Command("gh", "api", apiPath).Output()
+	if err != nil {
+		return nil, fmt.Errorf("fetching PR reviews: %w", err)
+	}
+
+	var reviews []ghReview
+	if err := json.Unmarshal(out, &reviews); err != nil {
+		return nil, fmt.Errorf("parsing PR reviews: %w", err)
+	}
+
+	const prefix = "<!-- clanopy:review "
+	const suffix = " -->"
+
+	for _, rev := range reviews {
+		idx := strings.Index(rev.Body, prefix)
+		if idx < 0 {
+			continue
+		}
+		start := idx + len(prefix)
+		endIdx := strings.Index(rev.Body[start:], suffix)
+		if endIdx < 0 {
+			continue
+		}
+		var result ReviewResult
+		if err := json.Unmarshal([]byte(rev.Body[start:start+endIdx]), &result); err != nil {
+			continue
+		}
+		for i := range result.Findings {
+			if result.Findings[i].FixRef == fixRef {
+				return &result.Findings[i], nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("fix_ref %q not found in any review on PR #%d", fixRef, prNumber)
+}
+
 // DetectRepo gets owner/name from the current git remote.
 func DetectRepo() (string, error) {
 	out, err := exec.Command("gh", "repo", "view",
@@ -290,12 +336,8 @@ type ReviewThread struct {
 	Path     string
 	Line     int
 	Body     string
-	FixRef   string // extracted from body
 	Resolved bool
 }
-
-// fixRefRe matches `clanopy fix <ref>` in a comment body.
-var fixRefRe = regexp.MustCompile(`clanopy fix (\S+)`)
 
 // graphQLThreadsResponse is the JSON shape returned by the review threads query.
 type graphQLThreadsResponse struct {
@@ -367,17 +409,11 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 			continue
 		}
 
-		var fixRef string
-		if m := fixRefRe.FindStringSubmatch(comment.Body); m != nil {
-			fixRef = m[1]
-		}
-
 		threads = append(threads, ReviewThread{
 			ID:       node.ID,
 			Path:     comment.Path,
 			Line:     comment.Line,
 			Body:     comment.Body,
-			FixRef:   fixRef,
 			Resolved: node.IsResolved,
 		})
 	}
