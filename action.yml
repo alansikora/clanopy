@@ -26,7 +26,7 @@ runs:
     - name: Install clanopy
       shell: bash
       run: |
-        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh -s -- --version "${{ github.action_ref }}"
+        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Claude Code

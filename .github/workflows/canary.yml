@@ -32,13 +32,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Stamp action.yml for canary
+        run: |
+          sed -i 's|install.sh | sh|install.sh | sh -s -- --canary|' action.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add action.yml
+          git commit -m "stamp canary action"
+
       - name: Publish canary release
         run: |
           gh release delete canary --yes --cleanup-tag 2>/dev/null || true
           gh release create canary dist/*.tar.gz dist/checksums.txt \
-            --title "Canary ($(git rev-parse --short HEAD))" \
-            --notes "Latest build from \`main\` — commit $(git rev-parse --short HEAD). Not a stable release." \
+            --title "Canary ($(git rev-parse --short HEAD~1))" \
+            --notes "Latest build from \`main\` — commit $(git rev-parse --short HEAD~1). Not a stable release." \
             --prerelease \
-            --target main
+            --target "$(git rev-parse HEAD)"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
