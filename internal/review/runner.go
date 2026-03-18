@@ -252,7 +252,7 @@ func Run(opts RunOptions) error {
 
 	// 11. Post review if requested (uses PR Review API for inline comments).
 	if opts.Post {
-		if err := PostReview(repo, opts.PRNumber, result, pr.Files); err != nil {
+		if err := PostReview(repo, opts.PRNumber, result, pr.Diff); err != nil {
 			return fmt.Errorf("posting review: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)

@@ -134,7 +134,7 @@ func buildSeveritySummary(findings []Finding) string {
 
 // FormatReviewBody renders the summary body for a PR review, including hidden
 // review data. Inline findings are posted as separate line comments.
-func FormatReviewBody(result *ReviewResult, diffFileSet map[string]bool) string {
+func FormatReviewBody(result *ReviewResult, canInline func(Finding) bool) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "## \U0001F33F Clanopy Review: PR #%d\n\n", result.PRNumber)
@@ -148,15 +148,10 @@ func FormatReviewBody(result *ReviewResult, diffFileSet map[string]bool) string 
 		b.WriteString("\n")
 	}
 
-	// A finding can be posted inline only if it has file+line and the file is in the diff.
-	isInline := func(f Finding) bool {
-		return f.File != "" && f.Line > 0 && diffFileSet[f.File]
-	}
-
 	// Check if there are any inline (line-level) comments.
 	hasInline := false
 	for _, f := range result.Findings {
-		if isInline(f) {
+		if canInline(f) {
 			hasInline = true
 			break
 		}
@@ -167,7 +162,7 @@ func FormatReviewBody(result *ReviewResult, diffFileSet map[string]bool) string 
 
 	// Include findings that cannot be posted inline.
 	for _, f := range result.Findings {
-		if !isInline(f) {
+		if !canInline(f) {
 			b.WriteString("\n---\n\n")
 			icon := severityIcon(f.Severity)
 			fmt.Fprintf(&b, "### %s **%s** \u2014 `%s`\n\n", icon, f.Severity, f.ID)

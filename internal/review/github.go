@@ -104,32 +104,100 @@ type reviewComment struct {
 	Body string `json:"body"`
 }
 
+// diffLineMap maps each file to its sorted list of valid line numbers from the diff.
+type diffLineMap map[string][]int
+
+// parseDiffLines extracts valid line numbers per file from a unified diff.
+func parseDiffLines(diff string) diffLineMap {
+	valid := make(diffLineMap)
+	var currentFile string
+	var lineNum int
+
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++ b/") {
+			currentFile = line[6:]
+			continue
+		}
+		if strings.HasPrefix(line, "@@ ") {
+			// Parse hunk header: @@ -old,count +new,count @@
+			if idx := strings.Index(line, "+"); idx >= 0 {
+				rest := line[idx+1:]
+				if comma := strings.IndexAny(rest, ", "); comma >= 0 {
+					rest = rest[:comma]
+				}
+				fmt.Sscanf(rest, "%d", &lineNum)
+			}
+			continue
+		}
+		if currentFile == "" || lineNum == 0 {
+			continue
+		}
+		if strings.HasPrefix(line, "-") {
+			continue
+		}
+		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, " ") {
+			valid[currentFile] = append(valid[currentFile], lineNum)
+			lineNum++
+			continue
+		}
+	}
+	return valid
+}
+
+// nearestLine returns the closest valid diff line for a file:line pair.
+// Returns the line itself if valid, the nearest valid line in that file,
+// or 0 if the file is not in the diff at all.
+func (d diffLineMap) nearestLine(file string, line int) int {
+	lines, ok := d[file]
+	if !ok || len(lines) == 0 {
+		return 0
+	}
+	best := lines[0]
+	bestDist := abs(line - best)
+	for _, l := range lines[1:] {
+		dist := abs(line - l)
+		if dist < bestDist {
+			best = l
+			bestDist = dist
+		}
+	}
+	return best
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // PostReview posts a PR review with inline comments using the GitHub API.
 // Findings with file and line information become inline comments; others are
 // included in the review body.
-func PostReview(repo string, prNumber int, result *ReviewResult, diffFiles []string) error {
+func PostReview(repo string, prNumber int, result *ReviewResult, diff string) error {
 	// Sort findings by severity before formatting.
 	sortFindings(result.Findings)
 
-	// Build a set of files in the PR diff for fast lookup.
-	diffFileSet := make(map[string]bool, len(diffFiles))
-	for _, f := range diffFiles {
-		diffFileSet[f] = true
+	// Parse the diff to find valid line positions for inline comments.
+	validLines := parseDiffLines(diff)
+
+	// A finding can be inlined if its file is in the diff.
+	canInline := func(f Finding) bool {
+		return f.File != "" && f.Line > 0 && validLines.nearestLine(f.File, f.Line) > 0
 	}
 
-	// Build inline comments for findings that have file+line and are in the diff.
 	var comments []reviewComment
 	for _, f := range result.Findings {
-		if f.File != "" && f.Line > 0 && diffFileSet[f.File] {
+		if canInline(f) {
 			comments = append(comments, reviewComment{
 				Path: f.File,
-				Line: f.Line,
+				Line: validLines.nearestLine(f.File, f.Line),
 				Body: FormatFindingComment(&f),
 			})
 		}
 	}
 
-	body := FormatReviewBody(result, diffFileSet)
+	body := FormatReviewBody(result, canInline)
 
 	payload := reviewPayload{
 		Event:    "COMMENT",
