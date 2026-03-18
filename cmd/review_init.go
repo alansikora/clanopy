@@ -92,7 +92,6 @@ on:
 permissions:
   pull-requests: write
   contents: read
-  issues: write
 
 jobs:
   review:
@@ -103,6 +102,8 @@ jobs:
       - uses: alansikora/clanopy@%s
         with:
 %s
+          # Optional: enables auto-resolving fixed review threads.
+          github_token: ${{ secrets.CLANOPY_GH_PAT_TOKEN || github.token }}
           config_path: .clanopy/review.yml
 `, actionRef, authEnv)
 

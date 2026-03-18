@@ -6,7 +6,6 @@ on:
 permissions:
   pull-requests: write
   contents: read
-  issues: write
 
 jobs:
   review:
@@ -16,3 +15,4 @@ jobs:
       - uses: alansikora/clanopy@canary
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.CLANOPY_GH_PAT_TOKEN || github.token }}
