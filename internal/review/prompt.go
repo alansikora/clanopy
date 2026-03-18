@@ -10,7 +10,8 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig) string {
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. Review the following pull request and report findings.\n")
-	b.WriteString("You will be given the full contents of changed files for context, along with the diff. Only report issues that are directly related to the changes in the diff — do not flag pre-existing issues in unchanged code.\n\n")
+	b.WriteString("You will be given the full contents of changed files for context, along with the diff. Only report issues that are directly related to the changes in the diff — do not flag pre-existing issues in unchanged code.\n")
+	b.WriteString("Also consider whether the changes could cause side effects in other files that depend on or interact with the modified code (e.g. callers, importers, shared state). If you identify a potential side effect, anchor your finding to the relevant line in the diff and describe the affected downstream code in the description.\n\n")
 
 	// PR metadata.
 	fmt.Fprintf(&b, "## Pull Request #%d\n", pr.Number)
@@ -119,7 +120,8 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. Review ONLY the following incremental changes and report NEW findings.\n")
-	b.WriteString("You will be given the full contents of changed files for context, along with the diff. Only report issues that are directly related to the changes in the diff — do not flag pre-existing issues in unchanged code.\n\n")
+	b.WriteString("You will be given the full contents of changed files for context, along with the diff. Only report issues that are directly related to the changes in the diff — do not flag pre-existing issues in unchanged code.\n")
+	b.WriteString("Also consider whether the changes could cause side effects in other files that depend on or interact with the modified code (e.g. callers, importers, shared state). If you identify a potential side effect, anchor your finding to the relevant line in the diff and describe the affected downstream code in the description.\n\n")
 
 	// Context from config.
 	if cfg != nil && cfg.Context != "" {
