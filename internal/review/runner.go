@@ -157,57 +157,66 @@ func Run(opts RunOptions) error {
 	if len(clanopyThreads) > 0 && previousSHA != "" {
 		// Incremental review.
 		fmt.Fprintf(os.Stderr, "Re-reviewing PR #%d (%d unresolved threads, base %s)\n", opts.PRNumber, len(clanopyThreads), previousSHA[:8])
-		incrementalDiff, err := GetIncrementalDiff(previousSHA)
-		if err != nil {
-			// Fall back to full review.
-			fmt.Fprintf(os.Stderr, "Could not compute incremental diff, falling back to full review\n")
-			prompt = BuildPrompt(pr, cfg, startIndex)
-		} else {
-			// Phase 1: Re-evaluate existing findings.
-			fmt.Fprintf(os.Stderr, "Evaluating %d previous findings against new changes...\n", len(clanopyThreads))
-			reevalPrompt := BuildReevaluatePrompt(clanopyThreads, incrementalDiff)
+		incrementalDiff, diffErr := GetIncrementalDiff(previousSHA)
+		if diffErr != nil {
+			fmt.Fprintf(os.Stderr, "Could not compute incremental diff, will use full PR diff for reevaluation\n")
+		}
 
-			if opts.DryRun {
-				fmt.Print(reevalPrompt)
-				fmt.Print("\n---\n\n")
-			} else {
-				reevalOutput, err := runClaude(reevalPrompt, env)
-				if err == nil {
-					fixedIndices = parseFixedThreads(string(reevalOutput))
-					fmt.Fprintf(os.Stderr, "Result: %d fixed, %d still open\n", len(fixedIndices), len(clanopyThreads)-len(fixedIndices))
-					for _, idx := range fixedIndices {
-						if idx >= 0 && idx < len(clanopyThreads) {
-							t := clanopyThreads[idx]
-							label := t.Path
-							if firstLine := t.Body; firstLine != "" {
-								if nl := strings.Index(firstLine, "\n"); nl >= 0 {
-									firstLine = firstLine[:nl]
-								}
-								label = firstLine
+		// Phase 1: Re-evaluate existing findings.
+		// Use incremental diff when available, otherwise fall back to the full PR diff.
+		reevalDiff := incrementalDiff
+		if diffErr != nil {
+			reevalDiff = pr.Diff
+		}
+		fmt.Fprintf(os.Stderr, "Evaluating %d previous findings against new changes...\n", len(clanopyThreads))
+		reevalPrompt := BuildReevaluatePrompt(clanopyThreads, reevalDiff)
+
+		if opts.DryRun {
+			fmt.Print(reevalPrompt)
+			fmt.Print("\n---\n\n")
+		} else {
+			reevalOutput, err := runClaude(reevalPrompt, env)
+			if err == nil {
+				fixedIndices = parseFixedThreads(string(reevalOutput))
+				fmt.Fprintf(os.Stderr, "Result: %d fixed, %d still open\n", len(fixedIndices), len(clanopyThreads)-len(fixedIndices))
+				for _, idx := range fixedIndices {
+					if idx >= 0 && idx < len(clanopyThreads) {
+						t := clanopyThreads[idx]
+						label := t.Path
+						if firstLine := t.Body; firstLine != "" {
+							if nl := strings.Index(firstLine, "\n"); nl >= 0 {
+								firstLine = firstLine[:nl]
 							}
-							if err := ResolveThread(t.ID); err != nil {
-								fmt.Fprintf(os.Stderr, "  ✗ %s — failed to resolve: %v\n", label, err)
-							} else {
-								fmt.Fprintf(os.Stderr, "  ✓ %s — resolved\n", label)
-							}
+							label = firstLine
+						}
+						if err := ResolveThread(t.ID); err != nil {
+							fmt.Fprintf(os.Stderr, "  ✗ %s — failed to resolve: %v\n", label, err)
+						} else {
+							fmt.Fprintf(os.Stderr, "  ✓ %s — resolved\n", label)
 						}
 					}
-				} else {
-					fmt.Fprintf(os.Stderr, "Warning: re-evaluation failed: %v\n", err)
 				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: re-evaluation failed: %v\n", err)
 			}
+		}
 
-			// Phase 2: Review incremental diff.
-			fixedSet := make(map[int]bool, len(fixedIndices))
-			for _, idx := range fixedIndices {
-				fixedSet[idx] = true
+		// Phase 2: Build review prompt.
+		fixedSet := make(map[int]bool, len(fixedIndices))
+		for _, idx := range fixedIndices {
+			fixedSet[idx] = true
+		}
+		var unresolved []ReviewThread
+		for i, t := range clanopyThreads {
+			if !fixedSet[i] {
+				unresolved = append(unresolved, t)
 			}
-			var unresolved []ReviewThread
-			for i, t := range clanopyThreads {
-				if !fixedSet[i] {
-					unresolved = append(unresolved, t)
-				}
-			}
+		}
+		if diffErr != nil {
+			// No incremental diff available — fall back to full review.
+			fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issues excluded)...\n", len(unresolved))
+			prompt = BuildPrompt(pr, cfg, startIndex)
+		} else {
 			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issues excluded)...\n", len(unresolved))
 			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, pr.FileContents, pr.Files)
 		}
