@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alansikora/clanopy/internal/auth"
+	"github.com/alansikora/clanopy/internal/review"
 	"github.com/spf13/cobra"
 )
 
@@ -120,27 +121,9 @@ jobs:
 			fmt.Fprintf(os.Stderr, "  Created %s\n", workflowPath)
 		}
 
-		// 4. Create starter review config.
+		// 4. Generate review config using Claude (fall back to static template).
 		configDir := ".clanopy"
 		configPath := filepath.Join(configDir, "review.yml")
-
-		starterConfig := `version: 1
-
-# Add review rules for your project.
-# See https://github.com/alansikora/clanopy for documentation.
-#
-# rules:
-#   - id: example-rule
-#     description: "Describe what to check for"
-#     severity: warning
-#
-# context: |
-#   Describe your project stack and conventions here.
-#
-# ignore:
-#   - "dist/**"
-#   - "*.lock"
-`
 
 		if err := os.MkdirAll(configDir, 0755); err != nil {
 			return fmt.Errorf("creating config directory: %w", err)
@@ -149,7 +132,15 @@ jobs:
 		if _, err := os.Stat(configPath); err == nil {
 			fmt.Fprintf(os.Stderr, "  %s already exists, skipping\n", configPath)
 		} else {
-			if err := os.WriteFile(configPath, []byte(starterConfig), 0644); err != nil {
+			configContent := review.StarterConfig
+			fmt.Fprintf(os.Stderr, "Generating review config...\n")
+			if generated, err := review.Generate(); err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: could not generate config with Claude: %v\n", err)
+				fmt.Fprintf(os.Stderr, "  Using starter template instead\n")
+			} else {
+				configContent = generated + "\n"
+			}
+			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 				return fmt.Errorf("writing review config: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "  Created %s\n", configPath)
