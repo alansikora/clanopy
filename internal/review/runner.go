@@ -76,7 +76,7 @@ func Run(opts RunOptions) error {
 	// Resolve workspace config dir if not already set, so Claude uses the
 	// correct auth credentials (the shell wrapper normally does this).
 	// Skip if auth is already provided via env (e.g. in CI).
-	hasAuth := os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_ACCESS_TOKEN") != ""
+	hasAuth := os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != ""
 	if os.Getenv("CLAUDE_CONFIG_DIR") == "" && !hasAuth {
 		cfg, err := config.Load()
 		if err == nil {

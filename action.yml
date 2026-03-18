@@ -5,7 +5,7 @@ branding:
   color: 'green'
 
 inputs:
-  claude_access_token:
+  claude_code_oauth_token:
     description: 'Claude access token (from /install-github-app). Preferred over api_key.'
     required: false
   anthropic_api_key:
@@ -37,7 +37,7 @@ runs:
     - name: Run review
       shell: bash
       env:
-        CLAUDE_ACCESS_TOKEN: ${{ inputs.claude_access_token }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         GH_TOKEN: ${{ github.token }}
       run: |

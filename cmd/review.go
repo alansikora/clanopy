@@ -11,8 +11,11 @@ import (
 var reviewCmd = &cobra.Command{
 	Use:   "review <pr-number>",
 	Short: "Review a pull request using Claude",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
 		prNumber, err := strconv.Atoi(args[0])
 		if err != nil {
 			return fmt.Errorf("invalid PR number %q: %w", args[0], err)

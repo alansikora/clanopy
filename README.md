@@ -120,7 +120,7 @@ jobs:
       - uses: alansikora/clanopy@v1
         with:
           # Use Claude access token (from /install-github-app)
-          claude_access_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Or use an API key instead:
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
