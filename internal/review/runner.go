@@ -1,10 +1,12 @@
 package review
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/alansikora/clanopy/internal/config"
 )
@@ -17,6 +19,68 @@ type RunOptions struct {
 	Output     string // "markdown" or "json"
 	Post       bool
 	DryRun     bool
+}
+
+// resolveEnv builds the environment for Claude, resolving workspace config.
+func resolveEnv() []string {
+	env := os.Environ()
+	hasAuth := os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != ""
+	if os.Getenv("CLAUDE_CONFIG_DIR") == "" && !hasAuth {
+		cfg, err := config.Load()
+		if err == nil {
+			cwd, _ := os.Getwd()
+			if ws, _, err := cfg.FindWorkspaceForDir(cwd); err == nil {
+				env = setEnv(env, "CLAUDE_CONFIG_DIR", config.SessionDir(ws.Name))
+				if ws.APIKey != "" {
+					env = setEnv(env, "ANTHROPIC_API_KEY", ws.APIKey)
+				}
+			}
+		}
+	}
+	return env
+}
+
+// runClaude executes Claude with the given prompt and environment.
+func runClaude(prompt string, env []string) ([]byte, error) {
+	cmd := exec.Command("claude", "--print", "--no-session-persistence", prompt)
+	cmd.Env = env
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("claude failed: %s\n%s", string(exitErr.Stderr), string(output))
+		}
+		return nil, fmt.Errorf("running claude: %w", err)
+	}
+	return output, nil
+}
+
+// parseFixedRefs extracts fix_ref strings from Claude's JSON response.
+func parseFixedRefs(output string) []string {
+	matches := jsonFenceRe.FindStringSubmatch(output)
+	if matches == nil {
+		return nil
+	}
+
+	var refs []string
+	if err := json.Unmarshal([]byte(matches[1]), &refs); err != nil {
+		return nil
+	}
+	return refs
+}
+
+// allResolved checks if all clanopy threads have been resolved.
+func allResolved(threads []ReviewThread, fixedRefs []string) bool {
+	fixedSet := make(map[string]bool, len(fixedRefs))
+	for _, ref := range fixedRefs {
+		fixedSet[ref] = true
+	}
+	for _, t := range threads {
+		if !fixedSet[t.FixRef] {
+			return false
+		}
+	}
+	return true
 }
 
 // Run orchestrates the full review flow.
@@ -46,10 +110,8 @@ func Run(opts RunOptions) error {
 	loaded, err := LoadConfig(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) {
-			// No config file — use default empty config for general review.
 			cfg = &ReviewConfig{}
 		} else {
-			// Try unwrapping in case the error wraps a path error.
 			var pathErr *os.PathError
 			if errors.As(err, &pathErr) {
 				cfg = &ReviewConfig{}
@@ -61,8 +123,69 @@ func Run(opts RunOptions) error {
 		cfg = loaded
 	}
 
-	// 4. Build prompt.
-	prompt := BuildPrompt(pr, cfg)
+	// Resolve Claude environment once for reuse.
+	env := resolveEnv()
+
+	// Check for previous clanopy review threads.
+	threads, _ := FetchReviewThreads(repo, opts.PRNumber)
+	var clanopyThreads []ReviewThread
+	for _, t := range threads {
+		if !t.Resolved && t.FixRef != "" {
+			clanopyThreads = append(clanopyThreads, t)
+		}
+	}
+	previousSHA := FetchPreviousReviewSHA(repo, opts.PRNumber)
+
+	var prompt string
+	var fixedRefs []string
+	if len(clanopyThreads) > 0 && previousSHA != "" {
+		// Incremental review.
+		incrementalDiff, err := GetIncrementalDiff(previousSHA)
+		if err != nil {
+			// Fall back to full review.
+			prompt = BuildPrompt(pr, cfg)
+		} else {
+			// Phase 1: Re-evaluate existing findings.
+			reevalPrompt := BuildReevaluatePrompt(clanopyThreads, incrementalDiff)
+
+			if opts.DryRun {
+				fmt.Print(reevalPrompt)
+				fmt.Print("\n---\n\n")
+			} else {
+				reevalOutput, err := runClaude(reevalPrompt, env)
+				if err == nil {
+					fixedRefs = parseFixedRefs(string(reevalOutput))
+					for _, t := range clanopyThreads {
+						for _, ref := range fixedRefs {
+							if t.FixRef == ref {
+								ResolveThread(t.ID)
+								fmt.Fprintf(os.Stderr, "Resolved: %s\n", t.FixRef)
+							}
+						}
+					}
+				}
+			}
+
+			// Phase 2: Review incremental diff.
+			var unresolved []ReviewThread
+			for _, t := range clanopyThreads {
+				resolved := false
+				for _, ref := range fixedRefs {
+					if t.FixRef == ref {
+						resolved = true
+						break
+					}
+				}
+				if !resolved {
+					unresolved = append(unresolved, t)
+				}
+			}
+			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber)
+		}
+	} else {
+		// First review — full PR diff.
+		prompt = BuildPrompt(pr, cfg)
+	}
 
 	// 5. Dry run — print prompt and return.
 	if opts.DryRun {
@@ -71,32 +194,9 @@ func Run(opts RunOptions) error {
 	}
 
 	// 6. Run Claude.
-	claudeCmd := exec.Command("claude", "--print", "--no-session-persistence", prompt)
-	env := os.Environ()
-	// Resolve workspace config dir if not already set, so Claude uses the
-	// correct auth credentials (the shell wrapper normally does this).
-	// Skip if auth is already provided via env (e.g. in CI).
-	hasAuth := os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != ""
-	if os.Getenv("CLAUDE_CONFIG_DIR") == "" && !hasAuth {
-		cfg, err := config.Load()
-		if err == nil {
-			cwd, _ := os.Getwd()
-			if ws, _, err := cfg.FindWorkspaceForDir(cwd); err == nil {
-				env = setEnv(env, "CLAUDE_CONFIG_DIR", config.SessionDir(ws.Name))
-				if ws.APIKey != "" {
-					env = setEnv(env, "ANTHROPIC_API_KEY", ws.APIKey)
-				}
-			}
-		}
-	}
-	claudeCmd.Env = env
-	claudeOutput, err := claudeCmd.Output()
+	claudeOutput, err := runClaude(prompt, env)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return fmt.Errorf("claude failed: %s\n%s", string(exitErr.Stderr), string(claudeOutput))
-		}
-		return fmt.Errorf("running claude: %w", err)
+		return err
 	}
 
 	// 7. Parse findings.
@@ -105,11 +205,24 @@ func Run(opts RunOptions) error {
 		return fmt.Errorf("parsing findings: %w", err)
 	}
 
+	// Get current HEAD SHA for tracking.
+	headSHA, _ := exec.Command("git", "rev-parse", "HEAD").Output()
+
 	// 8. Build result.
 	result := &ReviewResult{
 		PRNumber: opts.PRNumber,
 		Repo:     repo,
 		Findings: findings,
+		SHA:      strings.TrimSpace(string(headSHA)),
+	}
+
+	// Check if no new findings and we resolved everything.
+	if len(findings) == 0 && opts.Post {
+		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixedRefs) {
+			PostAllClearReview(repo, opts.PRNumber)
+			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
+			return nil
+		}
 	}
 
 	// 8b. Cache result for later use by `clanopy fix`.

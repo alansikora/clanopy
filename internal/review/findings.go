@@ -24,6 +24,7 @@ type ReviewResult struct {
 	Repo     string    `json:"repo"`
 	Findings []Finding `json:"findings"`
 	Summary  string    `json:"summary"`
+	SHA      string    `json:"sha,omitempty"`
 }
 
 // jsonFenceRe matches a ```json ... ``` code fence.
