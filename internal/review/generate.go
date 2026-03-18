@@ -259,15 +259,9 @@ func parseGeneratedConfig(output string) (string, error) {
 		return "", fmt.Errorf("generated YAML is invalid: %w", err)
 	}
 
-	// Only re-marshal when a fixup was applied; otherwise return the raw
-	// string so that Claude's comments are preserved.
+	// Inject missing version as a string prefix to preserve comments.
 	if cfg.Version == 0 {
-		cfg.Version = 1
-		out, err := yaml.Marshal(&cfg)
-		if err != nil {
-			return "", fmt.Errorf("marshaling config: %w", err)
-		}
-		return strings.TrimSpace(string(out)), nil
+		raw = "version: 1\n" + raw
 	}
 
 	return strings.TrimSpace(raw), nil
