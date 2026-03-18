@@ -239,9 +239,9 @@ max_findings: 50              # Limit number of findings per review
 // yamlFenceRe matches a ```yaml ... ``` code fence.
 var yamlFenceRe = regexp.MustCompile("(?s)```ya?ml\\s*\n(.*?)\n```")
 
-// parseGeneratedConfig extracts, validates, and normalizes YAML from Claude's response.
-// The parsed config is re-marshaled so that any fixups (e.g. missing version) are
-// reflected in the returned string.
+// parseGeneratedConfig extracts and validates YAML from Claude's response.
+// Returns the raw YAML string to preserve comments. Only re-marshals when a
+// fixup is needed (e.g. missing version field).
 func parseGeneratedConfig(output string) (string, error) {
 	raw := ""
 	matches := yamlFenceRe.FindStringSubmatch(output)
@@ -259,17 +259,18 @@ func parseGeneratedConfig(output string) (string, error) {
 		return "", fmt.Errorf("generated YAML is invalid: %w", err)
 	}
 
+	// Only re-marshal when a fixup was applied; otherwise return the raw
+	// string so that Claude's comments are preserved.
 	if cfg.Version == 0 {
 		cfg.Version = 1
+		out, err := yaml.Marshal(&cfg)
+		if err != nil {
+			return "", fmt.Errorf("marshaling config: %w", err)
+		}
+		return strings.TrimSpace(string(out)), nil
 	}
 
-	// Re-marshal so fixups are included in the output.
-	out, err := yaml.Marshal(&cfg)
-	if err != nil {
-		return "", fmt.Errorf("marshaling config: %w", err)
-	}
-
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(raw), nil
 }
 
 // Generate analyzes the repo and uses Claude to produce a review config.
