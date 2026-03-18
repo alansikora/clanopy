@@ -224,34 +224,48 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string) er
 	return nil
 }
 
-// FetchReviewFromPR extracts cached review data from a PR comment's hidden HTML tag.
+// FetchReviewFromPR extracts cached review data from a PR review's hidden HTML tag.
 func FetchReviewFromPR(repo string, prNumber int) (*ReviewResult, error) {
-	numStr := fmt.Sprintf("%d", prNumber)
-	out, err := exec.Command("gh", "pr", "view", numStr,
-		"--repo", repo,
-		"--json", "comments",
-		"--jq", ".comments[].body",
-	).Output()
-	if err != nil {
-		return nil, fmt.Errorf("fetching PR comments: %w", err)
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid repo format %q, expected owner/name", repo)
 	}
 
-	// Look for <!-- clanopy:review {...} --> in comments.
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
+	out, err := exec.Command("gh", "api", apiPath).Output()
+	if err != nil {
+		return nil, fmt.Errorf("fetching PR reviews: %w", err)
+	}
+
+	var reviews []ghReview
+	if err := json.Unmarshal(out, &reviews); err != nil {
+		return nil, fmt.Errorf("parsing PR reviews: %w", err)
+	}
+
 	const prefix = "<!-- clanopy:review "
 	const suffix = " -->"
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) && strings.HasSuffix(line, suffix) {
-			jsonData := line[len(prefix) : len(line)-len(suffix)]
-			var result ReviewResult
-			if err := json.Unmarshal([]byte(jsonData), &result); err != nil {
-				continue
-			}
-			return &result, nil
+
+	// Search from most recent to oldest.
+	for i := len(reviews) - 1; i >= 0; i-- {
+		body := reviews[i].Body
+		idx := strings.Index(body, prefix)
+		if idx < 0 {
+			continue
 		}
+		start := idx + len(prefix)
+		endIdx := strings.Index(body[start:], suffix)
+		if endIdx < 0 {
+			continue
+		}
+		jsonData := body[start : start+endIdx]
+		var result ReviewResult
+		if err := json.Unmarshal([]byte(jsonData), &result); err != nil {
+			continue
+		}
+		return &result, nil
 	}
 
-	return nil, fmt.Errorf("no clanopy review data found in PR #%d comments", prNumber)
+	return nil, fmt.Errorf("no clanopy review data found in PR #%d reviews", prNumber)
 }
 
 // DetectRepo gets owner/name from the current git remote.

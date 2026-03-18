@@ -31,33 +31,24 @@ var fixCmd = &cobra.Command{
 		// 2. Load review result: try local cache first, then fetch from PR comment.
 		result, err := review.LoadLatestResult(prNumber)
 		if err != nil {
-			repo, repoErr := review.DetectRepo()
-			if repoErr != nil {
-				return fmt.Errorf("no local cache and could not detect repo: %w", repoErr)
-			}
-			fmt.Fprintf(os.Stderr, "No local cache, fetching review from PR #%d...\n", prNumber)
-			result, err = review.FetchReviewFromPR(repo, prNumber)
+			result, err = fetchAndCacheReview(prNumber)
 			if err != nil {
-				return fmt.Errorf("loading review result: %w", err)
+				return err
 			}
-			// Cache it locally for next time.
-			review.SaveResult(result)
 		}
 
 		// 3. Find the finding by matching fix_ref.
-		var finding *review.Finding
-		for i := range result.Findings {
-			if result.Findings[i].FixRef == fixRef {
-				finding = &result.Findings[i]
-				break
+		finding, err := lookupFinding(result, fixRef, findingIdx)
+		if err != nil && result != nil {
+			// Cache might be stale — try fetching fresh data from PR.
+			freshResult, fetchErr := fetchAndCacheReview(prNumber)
+			if fetchErr == nil {
+				result = freshResult
+				finding, err = lookupFinding(result, fixRef, findingIdx)
 			}
 		}
-		if finding == nil {
-			// Fall back to index-based lookup.
-			if findingIdx < 1 || findingIdx > len(result.Findings) {
-				return fmt.Errorf("finding index %d out of range (1-%d)", findingIdx, len(result.Findings))
-			}
-			finding = &result.Findings[findingIdx-1]
+		if err != nil {
+			return err
 		}
 
 		// 4. Create git worktree.
@@ -140,6 +131,32 @@ var fixCmd = &cobra.Command{
 
 		return syscall.Exec(claudePath, []string{"claude", "--permission-mode", "plan", fixPrompt}, env)
 	},
+}
+
+func fetchAndCacheReview(prNumber int) (*review.ReviewResult, error) {
+	repo, err := review.DetectRepo()
+	if err != nil {
+		return nil, fmt.Errorf("no local cache and could not detect repo: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Fetching review from PR #%d...\n", prNumber)
+	result, err := review.FetchReviewFromPR(repo, prNumber)
+	if err != nil {
+		return nil, fmt.Errorf("loading review result: %w", err)
+	}
+	review.SaveResult(result)
+	return result, nil
+}
+
+func lookupFinding(result *review.ReviewResult, fixRef string, findingIdx int) (*review.Finding, error) {
+	for i := range result.Findings {
+		if result.Findings[i].FixRef == fixRef {
+			return &result.Findings[i], nil
+		}
+	}
+	if findingIdx < 1 || findingIdx > len(result.Findings) {
+		return nil, fmt.Errorf("finding index %d out of range (1-%d)", findingIdx, len(result.Findings))
+	}
+	return &result.Findings[findingIdx-1], nil
 }
 
 func parseFixRef(ref string) (prNumber, findingIdx int, err error) {
