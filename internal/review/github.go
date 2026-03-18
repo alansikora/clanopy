@@ -107,14 +107,20 @@ type reviewComment struct {
 // PostReview posts a PR review with inline comments using the GitHub API.
 // Findings with file and line information become inline comments; others are
 // included in the review body.
-func PostReview(repo string, prNumber int, result *ReviewResult) error {
+func PostReview(repo string, prNumber int, result *ReviewResult, diffFiles []string) error {
 	// Sort findings by severity before formatting.
 	sortFindings(result.Findings)
 
-	// Build inline comments for findings that have file+line.
+	// Build a set of files in the PR diff for fast lookup.
+	diffFileSet := make(map[string]bool, len(diffFiles))
+	for _, f := range diffFiles {
+		diffFileSet[f] = true
+	}
+
+	// Build inline comments for findings that have file+line and are in the diff.
 	var comments []reviewComment
 	for _, f := range result.Findings {
-		if f.File != "" && f.Line > 0 {
+		if f.File != "" && f.Line > 0 && diffFileSet[f.File] {
 			comments = append(comments, reviewComment{
 				Path: f.File,
 				Line: f.Line,
@@ -123,7 +129,7 @@ func PostReview(repo string, prNumber int, result *ReviewResult) error {
 		}
 	}
 
-	body := FormatReviewBody(result)
+	body := FormatReviewBody(result, diffFileSet)
 
 	payload := reviewPayload{
 		Event:    "COMMENT",
