@@ -189,7 +189,7 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string) er
 		return f.File != "" && f.Line > 0 && validLines.nearestLine(f.File, f.Line) > 0
 	}
 
-	var comments []reviewComment
+	comments := make([]reviewComment, 0)
 	for _, f := range result.Findings {
 		if canInline(f) {
 			comments = append(comments, reviewComment{
