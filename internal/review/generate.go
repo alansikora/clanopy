@@ -78,7 +78,7 @@ func GatherRepoInfo() (*RepoInfo, error) {
 
 	// Detect languages by walking and collecting extensions.
 	extCounts := make(map[string]int)
-	filepath.Walk(".", func(path string, fi os.FileInfo, err error) error {
+	if err := filepath.Walk(".", func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -94,7 +94,9 @@ func GatherRepoInfo() (*RepoInfo, error) {
 			extCounts[lang]++
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("walking directory for language detection: %w", err)
+	}
 
 	// Sort languages by frequency.
 	type langCount struct {
