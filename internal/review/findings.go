@@ -28,7 +28,7 @@ type ReviewResult struct {
 }
 
 // jsonFenceRe matches a ```json ... ``` code fence.
-var jsonFenceRe = regexp.MustCompile("(?s)```json\\s*\n(.*?)```")
+var jsonFenceRe = regexp.MustCompile("(?s)```json\\s*\n(.*?)\n```")
 
 // ParseFindings extracts findings from Claude's output by looking for a JSON
 // array inside a ```json code fence. It tries all matches in case an earlier
