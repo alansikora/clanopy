@@ -9,11 +9,29 @@ import (
 )
 
 type ReviewConfig struct {
-	Version     int          `yaml:"version"`
-	Rules       []Rule       `yaml:"rules"`
-	Context     string       `yaml:"context"`
-	Ignore      []string     `yaml:"ignore"`
-	MaxFindings int          `yaml:"max_findings"`
+	Version      int      `yaml:"version"`
+	Rules        []Rule   `yaml:"rules"`
+	Context      string   `yaml:"context"`
+	Ignore       []string `yaml:"ignore"`
+	MaxFindings  int      `yaml:"max_findings"`
+	MaxFileSize  int      `yaml:"max_file_size"`  // per-file content limit in bytes (default 100KB)
+	MaxTotalSize int      `yaml:"max_total_size"` // total file content limit in bytes (default 500KB)
+}
+
+// EffectiveMaxFileSize returns the per-file size limit, defaulting to 100KB.
+func (c *ReviewConfig) EffectiveMaxFileSize() int {
+	if c != nil && c.MaxFileSize > 0 {
+		return c.MaxFileSize
+	}
+	return 100 * 1024
+}
+
+// EffectiveMaxTotalSize returns the total file content limit, defaulting to 500KB.
+func (c *ReviewConfig) EffectiveMaxTotalSize() int {
+	if c != nil && c.MaxTotalSize > 0 {
+		return c.MaxTotalSize
+	}
+	return 500 * 1024
 }
 
 type Rule struct {

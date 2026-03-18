@@ -122,6 +122,13 @@ func Run(opts RunOptions) error {
 		cfg = loaded
 	}
 
+	// Fetch full file contents for context.
+	fileContents, skippedFiles := FetchFileContents(pr.Files, cfg.Ignore, cfg.EffectiveMaxFileSize(), cfg.EffectiveMaxTotalSize())
+	pr.FileContents = fileContents
+	if len(skippedFiles) > 0 {
+		fmt.Fprintf(os.Stderr, "Skipped %d large/ignored files: %s\n", len(skippedFiles), strings.Join(skippedFiles, ", "))
+	}
+
 	// Resolve Claude environment once for reuse.
 	env := resolveEnv()
 
@@ -179,7 +186,7 @@ func Run(opts RunOptions) error {
 					unresolved = append(unresolved, t)
 				}
 			}
-			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber)
+			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, pr.FileContents, pr.Files)
 		}
 	} else {
 		// First review — full PR diff.

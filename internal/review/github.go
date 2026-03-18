@@ -1,23 +1,27 @@
 package review
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 // PRData holds PR metadata and diff.
 type PRData struct {
-	Number     int
-	Title      string
-	Body       string
-	Author     string
-	BaseBranch string
-	HeadBranch string
-	Diff       string
-	Files      []string
+	Number       int
+	Title        string
+	Body         string
+	Author       string
+	BaseBranch   string
+	HeadBranch   string
+	Diff         string
+	Files        []string
+	FileContents map[string]string // path -> full file content
 }
 
 // ghPRView is the JSON shape returned by gh pr view.
@@ -475,4 +479,70 @@ func PostAllClearReview(repo string, prNumber int) error {
 		return fmt.Errorf("gh api create review: %w\n%s", err, string(out))
 	}
 	return nil
+}
+
+// FetchFileContents reads the full contents of changed files from disk.
+// It skips files that are too large, binary, deleted, or match ignore patterns.
+// Returns a map of path->content and a list of skipped file paths.
+func FetchFileContents(files []string, ignorePatterns []string, maxPerFile, maxTotal int) (map[string]string, []string) {
+	contents := make(map[string]string)
+	var skipped []string
+	totalSize := 0
+
+	for _, path := range files {
+		// Check ignore patterns.
+		if matchesIgnore(path, ignorePatterns) {
+			skipped = append(skipped, path)
+			continue
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			// File may have been deleted in this PR — skip gracefully.
+			continue
+		}
+
+		// Skip binary files (null bytes in first 512 bytes).
+		peek := data
+		if len(peek) > 512 {
+			peek = peek[:512]
+		}
+		if bytes.ContainsRune(peek, 0) {
+			skipped = append(skipped, path)
+			continue
+		}
+
+		size := len(data)
+
+		// Skip files exceeding per-file limit.
+		if size > maxPerFile {
+			skipped = append(skipped, path)
+			continue
+		}
+
+		// Stop if total budget would be exceeded.
+		if totalSize+size > maxTotal {
+			skipped = append(skipped, path)
+			continue
+		}
+
+		contents[path] = string(data)
+		totalSize += size
+	}
+
+	return contents, skipped
+}
+
+// matchesIgnore checks if a path matches any of the ignore glob patterns.
+func matchesIgnore(path string, patterns []string) bool {
+	for _, pat := range patterns {
+		if matched, _ := filepath.Match(pat, path); matched {
+			return true
+		}
+		// Also try matching against just the filename.
+		if matched, _ := filepath.Match(pat, filepath.Base(path)); matched {
+			return true
+		}
+	}
+	return false
 }
