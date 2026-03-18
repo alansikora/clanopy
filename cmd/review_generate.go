@@ -61,7 +61,6 @@ var reviewGenerateCmd = &cobra.Command{
 }
 
 func init() {
-	reviewGenerateCmd.Flags().Bool("dry-run", false, "Print generated config without writing")
 	reviewGenerateCmd.Flags().Bool("force", false, "Overwrite existing config without backup")
 	reviewCmd.AddCommand(reviewGenerateCmd)
 }

@@ -46,6 +46,6 @@ func init() {
 	reviewCmd.Flags().StringP("output", "o", "markdown", "Output format: markdown or json")
 	reviewCmd.Flags().Bool("post", false, "Post findings as a PR comment")
 	reviewCmd.Flags().StringP("config", "c", ".clanopy/review.yml", "Path to review config")
-	reviewCmd.Flags().Bool("dry-run", false, "Show prompt without running Claude")
+	reviewCmd.PersistentFlags().Bool("dry-run", false, "Show prompt without running Claude")
 	rootCmd.AddCommand(reviewCmd)
 }
