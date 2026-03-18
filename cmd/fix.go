@@ -69,15 +69,21 @@ var fixCmd = &cobra.Command{
 		worktreePath := fmt.Sprintf(".claude/worktrees/fix-%s", fixRef)
 		branchName := fmt.Sprintf("clanopy/fix-%s", fixRef)
 
-		gitCmd := exec.Command("git", "worktree", "add", worktreePath, "-b", branchName)
-		gitCmd.Dir = cwd
-		if output, err := gitCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("creating worktree: %s\n%s", err, string(output))
-		}
-
 		absWorktreePath := worktreePath
 		if !strings.HasPrefix(worktreePath, "/") {
 			absWorktreePath = cwd + "/" + worktreePath
+		}
+
+		// 4. Create worktree or reuse existing one.
+		resuming := false
+		if _, err := os.Stat(absWorktreePath); err == nil {
+			resuming = true
+		} else {
+			gitCmd := exec.Command("git", "worktree", "add", worktreePath, "-b", branchName)
+			gitCmd.Dir = cwd
+			if output, err := gitCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("creating worktree: %s\n%s", err, string(output))
+			}
 		}
 
 		// 5. Write finding context as instructions.
@@ -115,12 +121,16 @@ var fixCmd = &cobra.Command{
 			env = setEnv(env, "ANTHROPIC_API_KEY", ws.APIKey)
 		}
 
-		fmt.Fprintf(os.Stderr, "\033[90m↳ fixing %s in %s (PR #%d)\033[0m\n", finding.Title, finding.File, prNumber)
-
-		// 7. Exec into claude in the worktree directory with fix prompt.
 		if err := syscall.Chdir(absWorktreePath); err != nil {
 			return fmt.Errorf("changing to worktree directory: %w", err)
 		}
+
+		if resuming {
+			fmt.Fprintf(os.Stderr, "\033[90m↳ resuming fix for %s in %s (PR #%d)\033[0m\n", finding.Title, finding.File, prNumber)
+			return syscall.Exec(claudePath, []string{"claude", "--continue"}, env)
+		}
+
+		fmt.Fprintf(os.Stderr, "\033[90m↳ fixing %s in %s (PR #%d)\033[0m\n", finding.Title, finding.File, prNumber)
 
 		fixPrompt := fmt.Sprintf("Fix this issue in %s:%d — %s\n\n%s",
 			finding.File, finding.Line, finding.Title, finding.Description)
