@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -11,8 +12,15 @@ import (
 	"time"
 )
 
-// CacheDir returns the path to the cache directory.
+// CacheDir returns the path to the cache directory, anchored to the git repo root.
 func CacheDir() string {
+	// Find the git repo root so the cache is always in the same place
+	// regardless of which subdirectory the command is run from.
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err == nil {
+		root := strings.TrimSpace(string(out))
+		return filepath.Join(root, ".clanopy", "reviews")
+	}
 	return filepath.Join(".clanopy", "reviews")
 }
 
