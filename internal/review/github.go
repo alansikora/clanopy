@@ -484,6 +484,8 @@ func FetchPreviousReviewSHA(repo string, prNumber int) string {
 
 // GetIncrementalDiff gets the diff since a given SHA.
 func GetIncrementalDiff(baseSHA string) (string, error) {
+	// Ensure the base SHA is available locally (shallow clones may not have it).
+	exec.Command("git", "fetch", "--depth=1", "origin", baseSHA).Run()
 	out, err := exec.Command("git", "diff", baseSHA+"..HEAD").Output()
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
