@@ -264,11 +264,29 @@ func Run(opts RunOptions) error {
 		SHA:      strings.TrimSpace(string(headSHA)),
 	}
 
-	// Check if no new findings and we resolved everything.
+	// Handle zero-findings scenarios.
 	if len(findings) == 0 && opts.Post {
 		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixedIndices) {
-			PostAllClearReview(repo, opts.PRNumber)
+			// Re-review: all resolved — minimize old reviews and post all-clear.
+			if nodeIDs, err := FindClanopyReviewNodeIDs(repo, opts.PRNumber); err == nil {
+				for _, nodeID := range nodeIDs {
+					if err := MinimizeComment(nodeID); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not minimize review: %v\n", err)
+					}
+				}
+				if len(nodeIDs) > 0 {
+					fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", len(nodeIDs))
+				}
+			}
+			if err := PostAllClearReview(repo, opts.PRNumber); err != nil {
+				return fmt.Errorf("posting all-clear review: %w", err)
+			}
 			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
+			return nil
+		}
+		if len(clanopyThreads) > 0 {
+			// Re-review: old unresolved threads still exist, nothing new — do nothing.
+			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", len(clanopyThreads))
 			return nil
 		}
 	}
@@ -303,8 +321,15 @@ func Run(opts RunOptions) error {
 
 	// 11. Post review if requested (uses PR Review API for inline comments).
 	if opts.Post {
-		if err := PostReview(repo, opts.PRNumber, result, pr.Diff); err != nil {
-			return fmt.Errorf("posting review: %w", err)
+		if len(findings) == 0 {
+			// First review, no issues — post a clean congratulations message.
+			if err := PostCleanReview(repo, opts.PRNumber); err != nil {
+				return fmt.Errorf("posting review: %w", err)
+			}
+		} else {
+			if err := PostReview(repo, opts.PRNumber, result, pr.Diff); err != nil {
+				return fmt.Errorf("posting review: %w", err)
+			}
 		}
 		fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
 	}

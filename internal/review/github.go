@@ -433,7 +433,8 @@ func ResolveThread(threadID string) error {
 
 // ghReview is the JSON shape for a PR review from the REST API.
 type ghReview struct {
-	Body string `json:"body"`
+	NodeID string `json:"node_id"`
+	Body   string `json:"body"`
 }
 
 // FetchPreviousReviewSHA gets the SHA from the last clanopy review's hidden data.
@@ -493,8 +494,17 @@ func GetIncrementalDiff(baseSHA string) (string, error) {
 	return string(out), nil
 }
 
-// PostAllClearReview posts a review when all findings have been resolved.
+// PostCleanReview posts a review when the first review finds no issues.
+func PostCleanReview(repo string, prNumber int) error {
+	return postSimpleReview(repo, prNumber, "\U0001F33F Clanopy reviewed this PR \u2014 no issues found.")
+}
+
+// PostAllClearReview posts a review when all previous findings have been resolved.
 func PostAllClearReview(repo string, prNumber int) error {
+	return postSimpleReview(repo, prNumber, "## \U0001F33F Clanopy Review\n\nAll previous findings have been addressed. No new issues found. \u2728")
+}
+
+func postSimpleReview(repo string, prNumber int, body string) error {
 	parts := strings.SplitN(repo, "/", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid repo format %q, expected owner/name", repo)
@@ -502,7 +512,7 @@ func PostAllClearReview(repo string, prNumber int) error {
 
 	payload := reviewPayload{
 		Event:    "COMMENT",
-		Body:     "## \U0001F33F Clanopy Review\n\nAll previous findings have been addressed. No new issues found. \u2728",
+		Body:     body,
 		Comments: make([]reviewComment, 0),
 	}
 
@@ -516,6 +526,46 @@ func PostAllClearReview(repo string, prNumber int) error {
 	cmd.Stdin = strings.NewReader(string(payloadJSON))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh api create review: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+// FindClanopyReviewNodeIDs returns the node_ids of all clanopy reviews on a PR.
+func FindClanopyReviewNodeIDs(repo string, prNumber int) ([]string, error) {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid repo format %q, expected owner/name", repo)
+	}
+
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
+	out, err := exec.Command("gh", "api", apiPath).Output()
+	if err != nil {
+		return nil, fmt.Errorf("fetching PR reviews: %w", err)
+	}
+
+	var reviews []ghReview
+	if err := json.Unmarshal(out, &reviews); err != nil {
+		return nil, fmt.Errorf("parsing PR reviews: %w", err)
+	}
+
+	const prefix = "<!-- clanopy:review "
+
+	var nodeIDs []string
+	for _, rev := range reviews {
+		if strings.Contains(rev.Body, prefix) {
+			nodeIDs = append(nodeIDs, rev.NodeID)
+		}
+	}
+
+	return nodeIDs, nil
+}
+
+// MinimizeComment hides a comment on GitHub using the minimizeComment GraphQL mutation.
+func MinimizeComment(nodeID string) error {
+	query := fmt.Sprintf(`mutation { minimizeComment(input: { subjectId: "%s", classifier: RESOLVED }) { minimizedComment { isMinimized } } }`, nodeID)
+	cmd := exec.Command("gh", "api", "graphql", "-f", "query="+query)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh api graphql minimize: %w\n%s", err, string(out))
 	}
 	return nil
 }
