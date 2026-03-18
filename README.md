@@ -1,30 +1,14 @@
-# <img width="150" alt="clanopy" src="https://github.com/user-attachments/assets/bc4a0277-e46d-44fd-8875-4e074405d470" /> clanopy
+# clanopy
 
+The canopy over your Claude Code. Workspaces, reviews, and workflows.
 
-A workspace manager for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Run multiple isolated Claude sessions — each workspace gets its own authentication, settings, and history.
+## What it does
 
-## Why
+**Workspaces** — Isolated Claude Code sessions per project. Each workspace gets its own auth, history, and settings. Just `cd` into a project and `claude` routes to the right workspace automatically.
 
-Claude Code stores everything in `~/.claude`. If you work across multiple projects, they all share the same session. clanopy gives each project its own `CLAUDE_CONFIG_DIR`, so you get:
+**PR Reviews** — Run `clanopy review <pr>` to have Claude review a pull request. Define review rules in `.clanopy/review.yml`. Use the GitHub Action for automated CI reviews.
 
-- **Isolated sessions** — separate auth, history, and settings per project
-- **Automatic routing** — `claude` just works based on your current directory
-- **Zero friction** — no manual env vars, no wrapper scripts
-
-## Features
-
-- **Isolated sessions** — each workspace gets its own auth, history, and settings
-- **Automatic routing** — `claude` resolves the right workspace based on your current directory
-- **Default workspace** — set a fallback workspace for directories without a match
-- **Per-workspace API keys** — use different Anthropic API keys per project
-- **Worktree mode** — auto-pass `--worktree` to Claude per workspace, bypass with `--no-worktree` / `-nw`
-- **Worktree session management** — list, apply, revert, and resume Claude worktree sessions
-- **Session resume** — resume a worktree session by name or branch with `clanopy resume`
-- **Slash commands** — `/clanopy apply` and `/clanopy unapply` available inside Claude Code sessions
-- **Disable attributions** — remove "Made with Claude Code" from commits and PRs per workspace
-- **Short alias** — optionally define `c` as a shorthand for `claude`
-- **TUI manager** — add, configure, and delete workspaces interactively
-- **Shell integration** — supports zsh, bash, and fish
+**Fix Workflow** — Each review finding includes a `clanopy fix` command that creates an isolated worktree with Claude pre-loaded to fix the issue.
 
 ## Install
 
@@ -39,8 +23,6 @@ clanopy init zsh    # writes to ~/.zshrc
 clanopy init bash   # writes to ~/.bashrc
 clanopy init fish   # writes to ~/.config/fish/config.fish
 ```
-
-Restart your shell, and you're done.
 
 <details>
 <summary>Other install methods</summary>
@@ -73,7 +55,84 @@ curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh 
 
 </details>
 
-## Usage
+## PR Reviews
+
+Review any pull request with Claude:
+
+```bash
+clanopy review 42              # review PR #42, output to terminal
+clanopy review 42 --post       # review and post findings as a PR comment
+clanopy review 42 --output json  # output as JSON
+clanopy review 42 --dry-run    # show the prompt without calling Claude
+```
+
+### Review rules
+
+Add a `.clanopy/review.yml` to your repo to define review rules:
+
+```yaml
+version: 1
+
+rules:
+  - id: no-console-log
+    description: "Production code should not contain console.log statements"
+    severity: error
+    paths: ["src/**/*.ts"]
+    exclude_paths: ["src/**/*.test.*"]
+
+  - id: error-handling
+    description: "Async functions must have error handling"
+    severity: warning
+
+context: |
+  This is a TypeScript monorepo using Next.js.
+
+ignore:
+  - "**/*.generated.*"
+  - "dist/**"
+  - "*.lock"
+
+max_findings: 50
+```
+
+Without a config file, Claude performs a general code review.
+
+### GitHub Action
+
+Add automated PR reviews to your CI:
+
+```yaml
+# .github/workflows/clanopy-review.yml
+name: Clanopy Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: alansikora/clanopy@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+### Fix workflow
+
+Each review finding includes a fix command:
+
+```bash
+clanopy fix 42-1    # fix finding #1 from PR #42
+```
+
+This creates a git worktree, writes the finding context as instructions for Claude, and launches an interactive Claude session to fix the issue.
+
+## Workspaces
 
 ### TUI
 
@@ -91,109 +150,54 @@ Opens an interactive manager:
 | `o` | General options |
 | `s` | Toggle default workspace (shown with ★) |
 | `d` / `x` | Delete workspace |
-| `↑` / `↓` | Navigate |
-| `esc` | Return to list |
 
-### Default workspace
+### Workspace features
 
-Press `s` to set a workspace as the default. When you run `claude` from a directory that doesn't match any workspace, the default is used instead of erroring.
-
-### Workspace options
-
-Press `enter` on a workspace to configure it:
-
-- **Disable attributions** — removes "Made with Claude Code" from commits and PRs
-- **Always use worktree** — automatically passes `--worktree` to Claude. Bypass for a single session with `claude --no-worktree` (or `-nw`)
+- **Isolated sessions** — separate auth, history, and settings per project
+- **Automatic routing** — `claude` resolves the right workspace based on your current directory
+- **Default workspace** — fallback for directories without a match
+- **Per-workspace API keys** — use different Anthropic API keys per project
+- **Worktree mode** — auto-pass `--worktree` to Claude per workspace
+- **Disable attributions** — remove "Made with Claude Code" from commits and PRs
+- **Short alias** — optionally define `c` as a shorthand for `claude`
 
 ### Worktree sessions
 
-When Claude Code runs with `--worktree`, it creates a git worktree under `.claude/worktrees/` with changes on a separate branch. Use these commands to manage those sessions:
-
 ```bash
-clanopy sessions              # list worktree sessions for the current workspace
-clanopy resume <name>         # resume a session by name or branch (launches claude --continue)
-clanopy apply [session]       # apply session changes as uncommitted diffs on main
-clanopy unapply               # revert applied changes (restores any auto-stashed state)
+clanopy sessions              # list worktree sessions
+clanopy resume <name>         # resume a session (launches claude --continue)
+clanopy apply [session]       # apply session changes as uncommitted diffs
+clanopy unapply               # revert applied changes
 ```
 
-`clanopy resume` finds the worktree, sets up the workspace environment, and launches Claude directly inside it — no need to manually `cd` or pass `--no-worktree`.
+Slash commands `/clanopy apply` and `/clanopy unapply` are also available inside Claude Code sessions.
 
-`clanopy apply` auto-detects the session name when run from inside a worktree. Changes are applied as uncommitted modifications — no merge commits. If your working tree is dirty, clanopy auto-stashes first and restores on `unapply`.
+## CLI reference
 
-You can also browse and manage sessions from the TUI by pressing `w` on a workspace:
-
-| Key | Action |
-|-----|--------|
-| `a` / `enter` | Apply session |
-| `u` | Unapply current session |
-| `c` | Copy worktree path to clipboard |
-| `d` | Delete session |
-| `esc` | Back to workspace list |
-
-### Slash commands
-
-clanopy installs Claude Code slash commands during `clanopy init`:
-
-- `/clanopy apply` — apply the current worktree session's changes to the main workspace
-- `/clanopy unapply` — revert previously applied changes
-
-These work inside any Claude Code session, including worktree sessions. The shell wrapper automatically skips adding `--worktree` when you use `--resume` or `--continue`, so resuming existing sessions works without needing `--no-worktree`.
-
-### General options
-
-Press `o` to configure global settings:
-
-- **Short alias** — defines `c` as a shorthand for `claude` (requires shell restart to take effect)
-
-### CLI commands
-
-```bash
-clanopy                   # open the TUI manager
-clanopy list              # list all workspaces with auth status
-clanopy sessions          # list worktree sessions for the current workspace
-clanopy resume <name>     # resume a worktree session by name or branch
-clanopy apply [session]   # apply worktree session changes to main
-clanopy unapply           # revert applied changes
-clanopy init zsh --print  # print the shell function without installing
+```
+clanopy                       # open the TUI manager
+clanopy review <pr>           # review a pull request with Claude
+clanopy fix <pr>-<index>      # fix a review finding in a worktree
+clanopy list                  # list all workspaces
+clanopy sessions              # list worktree sessions
+clanopy resume <name>         # resume a worktree session
+clanopy apply [session]       # apply worktree changes to main
+clanopy unapply               # revert applied changes
+clanopy init <shell>          # install shell integration
 ```
 
-### How it works
+## How it works
 
-After running `clanopy init zsh`, your shell has a thin `claude()` wrapper:
+After `clanopy init`, your shell has a thin `claude()` wrapper. When you run `claude` in any directory, it calls `clanopy resolve` to find the matching workspace using longest-prefix path matching. The resolved session directory is passed as `CLAUDE_CONFIG_DIR`.
 
-```bash
-claude() {
-  local resolve_output config_dir api_key worktree_flag
-  resolve_output="$(/path/to/clanopy resolve "$(pwd -P)")"
-  if [ $? -ne 0 ]; then
-    echo "clanopy: no workspace configured for $(pwd -P)" >&2
-    echo "Run 'clanopy' to manage workspaces." >&2
-    return 1
-  fi
-  config_dir="$(echo "$resolve_output" | head -n1)"
-  api_key="$(echo "$resolve_output" | sed -n '2p')"
-  worktree_flag="$(echo "$resolve_output" | sed -n '3p')"
-  # ... worktree and API key handling
-  CLAUDE_CONFIG_DIR="$config_dir" command claude "${args[@]}"
-}
-```
-
-When you run `claude` in any directory, the wrapper calls `clanopy resolve` to find the matching workspace using longest-prefix path matching. The resolved session directory is passed as `CLAUDE_CONFIG_DIR`.
-
-If the workspace has **Always use worktree** enabled, the wrapper also runs `git fetch origin <default-branch>` before launching Claude — so the worktree is always based on an up-to-date branch. The fetch is a best-effort no-op if there's no remote, no network, or `origin/HEAD` isn't set. Pass `--no-worktree` (or `-nw`) to skip both the fetch and the worktree for a single session.
-
-Workspaces and sessions are stored in `~/.config/clanopy/`:
+Config is stored in `~/.config/clanopy/`:
 
 ```
 ~/.config/clanopy/
 ├── config.json              # workspace definitions
 └── sessions/
     ├── myapp/               # CLAUDE_CONFIG_DIR for "myapp"
-    │   ├── .credentials.json
-    │   └── settings.json
     └── backend/
-        ├── .credentials.json
-        └── settings.json
 ```
 
 ## License
