@@ -133,6 +133,7 @@ on:
 permissions:
   pull-requests: write
   contents: read
+  issues: write          # required to auto-resolve fixed review threads
 
 jobs:
   review:

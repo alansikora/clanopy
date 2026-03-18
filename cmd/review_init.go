@@ -92,6 +92,7 @@ on:
 permissions:
   pull-requests: write
   contents: read
+  issues: write
 
 jobs:
   review:
