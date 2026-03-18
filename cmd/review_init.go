@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alansikora/clanopy/internal/auth"
 	"github.com/spf13/cobra"
 )
 
@@ -30,34 +31,52 @@ var reviewInitCmd = &cobra.Command{
 			secretName = "ANTHROPIC_API_KEY"
 		}
 
+		needsAuth := false
 		secretsOut, err := exec.Command("gh", "secret", "list", "--repo", repo).Output()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not check secrets: %v\n", err)
 		} else if !strings.Contains(string(secretsOut), secretName) {
+			needsAuth = true
+		}
+
+		if needsAuth {
 			if useAPIKey {
 				fmt.Fprintf(os.Stderr, "No %s secret found on %s.\n\n", secretName, repo)
 				fmt.Fprintf(os.Stderr, "Set it with:\n")
 				fmt.Fprintf(os.Stderr, "  gh secret set ANTHROPIC_API_KEY\n\n")
-			} else {
-				fmt.Fprintf(os.Stderr, "No %s secret found on %s.\n\n", secretName, repo)
-				fmt.Fprintf(os.Stderr, "To set it up, run one of:\n")
-				fmt.Fprintf(os.Stderr, "  1. /install-github-app inside a Claude Code session\n")
-				fmt.Fprintf(os.Stderr, "  2. gh secret set CLAUDE_CODE_OAUTH_TOKEN\n")
-				fmt.Fprintf(os.Stderr, "  3. clanopy review init --api-key (to use an API key instead)\n\n")
+				return nil
 			}
-			fmt.Fprintf(os.Stderr, "Run 'clanopy review init' again after setting up auth.\n")
-			return nil
+
+			// Step 1: Install Claude GitHub App.
+			if err := auth.InstallGitHubApp(repo); err != nil {
+				return fmt.Errorf("installing GitHub App: %w", err)
+			}
+
+			// Step 2: OAuth flow to get long-lived token.
+			token, err := auth.OAuthToken()
+			if err != nil {
+				return fmt.Errorf("authentication failed: %w", err)
+			}
+
+			// Step 3: Set token as GitHub secret.
+			fmt.Fprintf(os.Stderr, "Setting %s secret on %s...\n", secretName, repo)
+			if err := auth.SetGitHubSecret(repo, secretName, token); err != nil {
+				return fmt.Errorf("setting secret: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "  Done!\n\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s secret found on %s\n\n", secretName, repo)
 		}
 
 		// 3. Create workflow file.
 		workflowDir := filepath.Join(".github", "workflows")
 		workflowPath := filepath.Join(workflowDir, "clanopy-review.yml")
 
-		var authLine string
+		var authEnv string
 		if useAPIKey {
-			authLine = "          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}"
+			authEnv = "          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}"
 		} else {
-			authLine = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+			authEnv = "          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
 		}
 
 		workflow := fmt.Sprintf(`name: Clanopy Review
@@ -74,10 +93,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: alansikora/clanopy@v1
-        with:
+
+      - name: Install clanopy
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Review PR
+        env:
 %s
-`, authLine)
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          clanopy review "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --config ".clanopy/review.yml" \
+            --post
+`, authEnv)
 
 		if err := os.MkdirAll(workflowDir, 0755); err != nil {
 			return fmt.Errorf("creating workflow directory: %w", err)
@@ -127,7 +161,42 @@ jobs:
 			fmt.Fprintf(os.Stderr, "  Created %s\n", configPath)
 		}
 
-		fmt.Fprintf(os.Stderr, "\nDone! Commit and push these files to enable automated reviews.\n")
+		// 5. Create a PR with the review setup.
+		branch := "clanopy/review-setup"
+		fmt.Fprintf(os.Stderr, "\nCreating PR...\n")
+
+		// Create branch, add files, commit, push, create PR.
+		if out, err := exec.Command("git", "checkout", "-b", branch).CombinedOutput(); err != nil {
+			return fmt.Errorf("creating branch: %s\n%s", err, string(out))
+		}
+
+		if out, err := exec.Command("git", "add",
+			".github/workflows/clanopy-review.yml",
+			".clanopy/review.yml",
+		).CombinedOutput(); err != nil {
+			return fmt.Errorf("staging files: %s\n%s", err, string(out))
+		}
+
+		if out, err := exec.Command("git", "commit", "-m", "Add Clanopy automated PR review").CombinedOutput(); err != nil {
+			return fmt.Errorf("committing: %s\n%s", err, string(out))
+		}
+
+		if out, err := exec.Command("git", "push", "-u", "origin", branch).CombinedOutput(); err != nil {
+			return fmt.Errorf("pushing: %s\n%s", err, string(out))
+		}
+
+		prBody := "## Summary\n- Add Clanopy automated PR review workflow\n- Add starter `.clanopy/review.yml` config\n\nPRs will be automatically reviewed by Claude on open and update."
+		prOut, err := exec.Command("gh", "pr", "create",
+			"--title", "Add Clanopy PR review",
+			"--body", prBody,
+			"--repo", repo,
+		).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("creating PR: %s\n%s", err, string(prOut))
+		}
+
+		fmt.Fprintf(os.Stderr, "  %s\n", strings.TrimSpace(string(prOut)))
+		fmt.Fprintf(os.Stderr, "\nDone! Merge the PR to enable automated reviews.\n")
 		return nil
 	},
 }
