@@ -501,8 +501,9 @@ func PostAllClearReview(repo string, prNumber int) error {
 	}
 
 	payload := reviewPayload{
-		Event: "COMMENT",
-		Body:  "## \U0001F33F Clanopy Review\n\nAll previous findings have been addressed. No new issues found. \u2728",
+		Event:    "COMMENT",
+		Body:     "## \U0001F33F Clanopy Review\n\nAll previous findings have been addressed. No new issues found. \u2728",
+		Comments: make([]reviewComment, 0),
 	}
 
 	payloadJSON, err := json.Marshal(payload)
