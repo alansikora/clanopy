@@ -25,6 +25,7 @@ jobs:
           git add action.yml
           git commit -m "stamp action version $TAG"
           git tag -f "$TAG"
+          git push -f origin "$TAG"
 
       - uses: actions/setup-go@v6
         with:
