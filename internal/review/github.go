@@ -89,6 +89,66 @@ func PostComment(repo string, number int, body string) error {
 	return nil
 }
 
+// reviewPayload is the JSON structure for the GitHub PR review API.
+type reviewPayload struct {
+	Event    string          `json:"event"`
+	Body     string          `json:"body"`
+	Comments []reviewComment `json:"comments"`
+}
+
+// reviewComment is a single inline comment in a PR review.
+type reviewComment struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Body string `json:"body"`
+}
+
+// PostReview posts a PR review with inline comments using the GitHub API.
+// Findings with file and line information become inline comments; others are
+// included in the review body.
+func PostReview(repo string, prNumber int, result *ReviewResult) error {
+	// Sort findings by severity before formatting.
+	sortFindings(result.Findings)
+
+	// Build inline comments for findings that have file+line.
+	var comments []reviewComment
+	for _, f := range result.Findings {
+		if f.File != "" && f.Line > 0 {
+			comments = append(comments, reviewComment{
+				Path: f.File,
+				Line: f.Line,
+				Body: FormatFindingComment(&f),
+			})
+		}
+	}
+
+	body := FormatReviewBody(result)
+
+	payload := reviewPayload{
+		Event:    "COMMENT",
+		Body:     body,
+		Comments: comments,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling review payload: %w", err)
+	}
+
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid repo format %q, expected owner/name", repo)
+	}
+
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
+	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--input", "-")
+	cmd.Stdin = strings.NewReader(string(payloadJSON))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh api create review: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
 // FetchReviewFromPR extracts cached review data from a PR comment's hidden HTML tag.
 func FetchReviewFromPR(repo string, prNumber int) (*ReviewResult, error) {
 	numStr := fmt.Sprintf("%d", prNumber)

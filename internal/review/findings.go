@@ -11,7 +11,7 @@ type Finding struct {
 	ID          string `json:"id"`
 	File        string `json:"file"`
 	Line        int    `json:"line"`
-	Severity    string `json:"severity"`
+	Severity    string `json:"severity"` // One of: critical, bug, warning, suggestion, nitpick
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Suggestion  string `json:"suggestion,omitempty"`

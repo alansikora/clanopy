@@ -19,7 +19,7 @@ type ReviewConfig struct {
 type Rule struct {
 	ID           string   `yaml:"id"`
 	Description  string   `yaml:"description"`
-	Severity     string   `yaml:"severity"`
+	Severity     string   `yaml:"severity"` // One of: critical, bug, warning, suggestion, nitpick
 	Paths        []string `yaml:"paths"`
 	ExcludePaths []string `yaml:"exclude_paths"`
 }

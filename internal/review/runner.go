@@ -138,16 +138,12 @@ func Run(opts RunOptions) error {
 	// 10. Print to stdout.
 	fmt.Print(formatted)
 
-	// 11. Post comment if requested.
+	// 11. Post review if requested (uses PR Review API for inline comments).
 	if opts.Post {
-		mdOutput := formatted
-		if outputFormat != "markdown" {
-			mdOutput = FormatMarkdown(result)
+		if err := PostReview(repo, opts.PRNumber, result); err != nil {
+			return fmt.Errorf("posting review: %w", err)
 		}
-		if err := PostComment(repo, opts.PRNumber, mdOutput); err != nil {
-			return fmt.Errorf("posting comment: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Comment posted to PR #%d\n", opts.PRNumber)
+		fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
 	}
 
 	return nil

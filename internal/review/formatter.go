@@ -3,20 +3,66 @@ package review
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
 // severityIcon returns the emoji icon for a severity level.
 func severityIcon(severity string) string {
 	switch strings.ToLower(severity) {
-	case "error":
+	case "critical":
 		return "\U0001F534" // 🔴
+	case "bug":
+		return "\U0001F7E0" // 🟠
 	case "warning":
 		return "\U0001F7E1" // 🟡
-	case "info":
+	case "suggestion":
 		return "\U0001F535" // 🔵
+	case "nitpick":
+		return "\u26AA" // ⚪
 	default:
 		return "\U0001F535" // 🔵
+	}
+}
+
+// severityOrder returns a sort rank for a severity level (lower = more severe).
+func severityOrder(severity string) int {
+	switch strings.ToLower(severity) {
+	case "critical":
+		return 0
+	case "bug":
+		return 1
+	case "warning":
+		return 2
+	case "suggestion":
+		return 3
+	case "nitpick":
+		return 4
+	default:
+		return 5
+	}
+}
+
+// sortFindings sorts findings by severity (most severe first), preserving
+// relative order among findings of the same severity.
+func sortFindings(findings []Finding) {
+	sort.SliceStable(findings, func(i, j int) bool {
+		return severityOrder(findings[i].Severity) < severityOrder(findings[j].Severity)
+	})
+}
+
+// severityLabel returns a human-friendly plural-aware label for counts.
+func severityLabel(sev string, n int) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, sev)
+	}
+	switch sev {
+	case "warning":
+		return fmt.Sprintf("%d warnings", n)
+	case "nitpick":
+		return fmt.Sprintf("%d nitpicks", n)
+	default:
+		return fmt.Sprintf("%d %ss", n, sev)
 	}
 }
 
@@ -25,35 +71,18 @@ func severityIcon(severity string) string {
 func FormatMarkdown(result *ReviewResult) string {
 	var b strings.Builder
 
+	// Sort findings by severity.
+	sortFindings(result.Findings)
+
 	fmt.Fprintf(&b, "## \U0001F33F Clanopy Review: PR #%d\n\n", result.PRNumber)
 
 	// Summary section.
 	if result.Summary != "" {
 		fmt.Fprintf(&b, "### Summary\n%s\n", result.Summary)
 	} else {
-		// Build a default summary from severity counts.
-		counts := map[string]int{}
-		for _, f := range result.Findings {
-			counts[strings.ToLower(f.Severity)]++
-		}
-		parts := []string{}
-		total := len(result.Findings)
-		if n := counts["error"]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d error", n))
-			if n > 1 {
-				parts[len(parts)-1] += "s"
-			}
-		}
-		if n := counts["warning"]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d warning", n))
-			if n > 1 {
-				parts[len(parts)-1] += "s"
-			}
-		}
-		if n := counts["info"]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d info", n))
-		}
-		fmt.Fprintf(&b, "### Summary\nFound %d issues (%s)\n", total, strings.Join(parts, ", "))
+		b.WriteString("### Summary\n")
+		b.WriteString(buildSeveritySummary(result.Findings))
+		b.WriteString("\n")
 	}
 
 	// Individual findings.
@@ -79,6 +108,103 @@ func FormatMarkdown(result *ReviewResult) string {
 	jsonData, err := json.Marshal(result)
 	if err == nil {
 		fmt.Fprintf(&b, "\n<!-- clanopy:review %s -->\n", string(jsonData))
+	}
+
+	return b.String()
+}
+
+// buildSeveritySummary builds a default summary line from severity counts.
+func buildSeveritySummary(findings []Finding) string {
+	counts := map[string]int{}
+	for _, f := range findings {
+		counts[strings.ToLower(f.Severity)]++
+	}
+	total := len(findings)
+
+	// Ordered severity levels for consistent output.
+	levels := []string{"critical", "bug", "warning", "suggestion", "nitpick"}
+	var parts []string
+	for _, sev := range levels {
+		if n := counts[sev]; n > 0 {
+			parts = append(parts, severityLabel(sev, n))
+		}
+	}
+	return fmt.Sprintf("Found %d issues (%s)", total, strings.Join(parts, ", "))
+}
+
+// FormatReviewBody renders the summary body for a PR review, including hidden
+// review data. Inline findings are posted as separate line comments.
+func FormatReviewBody(result *ReviewResult) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "## \U0001F33F Clanopy Review: PR #%d\n\n", result.PRNumber)
+
+	// Summary section.
+	if result.Summary != "" {
+		fmt.Fprintf(&b, "### Summary\n%s\n", result.Summary)
+	} else {
+		b.WriteString("### Summary\n")
+		b.WriteString(buildSeveritySummary(result.Findings))
+		b.WriteString("\n")
+	}
+
+	// Check if there are any inline (line-level) comments.
+	hasInline := false
+	for _, f := range result.Findings {
+		if f.File != "" && f.Line > 0 {
+			hasInline = true
+			break
+		}
+	}
+	if hasInline {
+		b.WriteString("\nSee inline comments for details.\n")
+	}
+
+	// Include findings that cannot be posted inline (no file or line).
+	for _, f := range result.Findings {
+		if f.File == "" || f.Line <= 0 {
+			b.WriteString("\n---\n\n")
+			icon := severityIcon(f.Severity)
+			fmt.Fprintf(&b, "### %s **%s** \u2014 `%s`\n\n", icon, f.Severity, f.ID)
+			fmt.Fprintf(&b, "**%s**\n\n", f.Title)
+			fmt.Fprintf(&b, "%s\n", f.Description)
+			if f.Suggestion != "" {
+				fmt.Fprintf(&b, "\n> **Suggestion**: %s\n", f.Suggestion)
+			}
+			if f.FixRef != "" {
+				b.WriteString("\n<details><summary>Fix locally</summary>\n\n")
+				fmt.Fprintf(&b, "```\nclanopy fix %s\n```\n\n", f.FixRef)
+				b.WriteString("</details>\n")
+			}
+		}
+	}
+
+	// Embed review data as hidden HTML comment for `clanopy fix` to extract.
+	jsonData, err := json.Marshal(result)
+	if err == nil {
+		fmt.Fprintf(&b, "\n<!-- clanopy:review %s -->\n", string(jsonData))
+	}
+
+	return b.String()
+}
+
+// FormatFindingComment renders a single finding as markdown for an inline PR
+// review comment.
+func FormatFindingComment(f *Finding) string {
+	var b strings.Builder
+
+	icon := severityIcon(f.Severity)
+	fmt.Fprintf(&b, "%s **%s** \u2014 `%s`\n\n", icon, f.Severity, f.ID)
+	fmt.Fprintf(&b, "%s\n", f.Description)
+
+	if f.Suggestion != "" {
+		fmt.Fprintf(&b, "\n> **Suggestion**: %s\n", f.Suggestion)
+	}
+
+	if f.FixRef != "" {
+		b.WriteString("\n<details><summary>Fix locally</summary>\n\n")
+		fmt.Fprintf(&b, "```\nclanopy fix %s\n```\n\n", f.FixRef)
+		b.WriteString("</details>\n")
 	}
 
 	return b.String()
