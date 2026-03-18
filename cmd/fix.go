@@ -75,6 +75,14 @@ var fixCmd = &cobra.Command{
 			if output, err := gitCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("creating worktree: %s\n%s", err, string(output))
 			}
+
+			// Set upstream tracking to the PR's head branch so pushes target
+			// the correct remote branch instead of requiring manual routing.
+			if headBranch := getPRHeadBranch(result.Repo, prNumber); headBranch != "" {
+				trackCmd := exec.Command("git", "branch", "--set-upstream-to", "origin/"+headBranch, branchName)
+				trackCmd.Dir = cwd
+				_ = trackCmd.Run() // best-effort; don't fail the fix if tracking can't be set
+			}
 		}
 
 		// 5. Write finding context as instructions.
@@ -202,6 +210,19 @@ func buildFixInstructions(finding *review.Finding, result *review.ReviewResult) 
 	b.WriteString("After making the fix, verify that the code compiles and any related tests pass.\n")
 
 	return b.String()
+}
+
+// getPRHeadBranch returns the head branch name for a PR, or "" on any error.
+func getPRHeadBranch(repo string, prNumber int) string {
+	out, err := exec.Command("gh", "pr", "view", fmt.Sprintf("%d", prNumber),
+		"--repo", repo,
+		"--json", "headRefName",
+		"--jq", ".headRefName",
+	).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func init() {
