@@ -119,7 +119,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: alansikora/clanopy@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Use Claude access token (from /install-github-app)
+          claude_access_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
+          # Or use an API key instead:
+          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 ### Fix workflow

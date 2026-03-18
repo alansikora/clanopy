@@ -5,9 +5,12 @@ branding:
   color: 'green'
 
 inputs:
+  claude_access_token:
+    description: 'Claude access token (from /install-github-app). Preferred over api_key.'
+    required: false
   anthropic_api_key:
-    description: 'Anthropic API key for Claude'
-    required: true
+    description: 'Anthropic API key (alternative to access token)'
+    required: false
   config_path:
     description: 'Path to .clanopy/review.yml'
     required: false
@@ -24,6 +27,7 @@ runs:
       shell: bash
       run: |
         curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Claude Code
       shell: bash
@@ -33,6 +37,7 @@ runs:
     - name: Run review
       shell: bash
       env:
+        CLAUDE_ACCESS_TOKEN: ${{ inputs.claude_access_token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         GH_TOKEN: ${{ github.token }}
       run: |
