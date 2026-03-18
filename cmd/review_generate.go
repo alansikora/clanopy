@@ -14,7 +14,7 @@ var reviewGenerateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate a review config by analyzing the project with Claude",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		dryRun, _ := cmd.InheritedFlags().GetBool("dry-run")
 		force, _ := cmd.Flags().GetBool("force")
 
 		fmt.Fprintf(os.Stderr, "Analyzing project...\n")
