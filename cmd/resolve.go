@@ -62,17 +62,22 @@ var resolveCmd = &cobra.Command{
 		} else {
 			fmt.Print("\n")
 		}
-		if result.Worktree {
-			if isGitRepo(args[0]) {
-				fmt.Fprint(os.Stderr, "\033[90m↳ worktree mode enabled. Use --no-worktree to open claude normally.\033[0m\n")
-				fmt.Print("\n--worktree")
-			} else {
+		// Line 3: worktree flag (always print to keep line-based protocol stable)
+		if result.Worktree && isGitRepo(args[0]) {
+			fmt.Fprint(os.Stderr, "\033[90m↳ worktree mode enabled. Use --no-worktree to open claude normally.\033[0m\n")
+			fmt.Print("\n--worktree")
+		} else {
+			if result.Worktree {
 				fmt.Fprint(os.Stderr, "\033[90m↳ worktree mode skipped: not a git repository.\033[0m\n")
 			}
+			fmt.Print("\n")
 		}
+		// Line 4: auto mode flag (always print to keep line-based protocol stable)
 		if result.AutoMode {
 			fmt.Fprint(os.Stderr, "\033[90m↳ auto mode enabled\033[0m\n")
 			fmt.Print("\n--enable-auto-mode")
+		} else {
+			fmt.Print("\n")
 		}
 		return nil
 	},
