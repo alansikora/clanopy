@@ -107,12 +107,18 @@ var fixCmd = &cobra.Command{
 
 		fmt.Fprintf(os.Stderr, "\033[90m↳ fixing %s in %s (PR #%d)\033[0m\n", finding.Title, finding.File, prNumber)
 
-		// 7. Exec into claude in the worktree directory.
+		// 7. Exec into claude in the worktree directory with fix prompt.
 		if err := syscall.Chdir(absWorktreePath); err != nil {
 			return fmt.Errorf("changing to worktree directory: %w", err)
 		}
 
-		return syscall.Exec(claudePath, []string{"claude"}, env)
+		fixPrompt := fmt.Sprintf("Fix this issue in %s:%d — %s\n\n%s",
+			finding.File, finding.Line, finding.Title, finding.Description)
+		if finding.Suggestion != "" {
+			fixPrompt += "\n\nSuggested fix: " + finding.Suggestion
+		}
+
+		return syscall.Exec(claudePath, []string{"claude", "--permission-mode", "plan", fixPrompt}, env)
 	},
 }
 
