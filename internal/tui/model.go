@@ -141,7 +141,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		h, v := appStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v-7)
+		m.list.SetSize(msg.Width-h, msg.Height-v-headerHeight)
 		return m, nil
 
 	case tea.KeyMsg:
