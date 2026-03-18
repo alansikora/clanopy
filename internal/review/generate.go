@@ -243,8 +243,8 @@ var yamlFenceRe = regexp.MustCompile("(?s)```ya?ml\\s*\n(.*?)\n```")
 // Returns the raw YAML string to preserve comments. Only re-marshals when a
 // fixup is needed (e.g. missing version field).
 func parseGeneratedConfig(output string) (string, error) {
-	raw := ""
 	matches := yamlFenceRe.FindStringSubmatch(output)
+	var raw string
 	if matches == nil {
 		raw = output
 	} else {
