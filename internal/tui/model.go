@@ -101,7 +101,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionsLoading = false
 		m.loadingProject = ""
 		h, v := appStyle.GetFrameSize()
-		m.sessionsList = buildSessionsList(msg.sessions, msg.applied, m.width-h, m.height-v-7)
+		m.sessionsList = buildSessionsList(msg.sessions, msg.applied, m.width-h, m.height-v-headerHeight)
 		m.sessionsStatus = ""
 		if msg.wsPath != "" {
 			m.sessionsPath = msg.wsPath
@@ -141,7 +141,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		h, v := appStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v-7)
+		m.list.SetSize(msg.Width-h, msg.Height-v-headerHeight)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -161,7 +161,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sessionsLoading = false
 				projects := m.cfg.ProjectsForWorkspace(m.projectsTarget)
 				h, v := appStyle.GetFrameSize()
-				m.projectList = buildProjectList(projects, m.projectsTarget, m.width-h, m.height-v-7)
+				m.projectList = buildProjectList(projects, m.projectsTarget, m.width-h, m.height-v-headerHeight)
 				m.state = stateProjectList
 				return m, nil
 			default:
