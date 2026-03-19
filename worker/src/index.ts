@@ -1,0 +1,126 @@
+import * as jose from "jose";
+
+interface Env {
+  APP_ID: string;
+  APP_PRIVATE_KEY: string;
+}
+
+const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
+const GITHUB_API = "https://api.github.com";
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204 });
+    }
+
+    if (request.method !== "POST" || new URL(request.url).pathname !== "/token") {
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+
+    try {
+      // 1. Extract OIDC token from Authorization header.
+      const authHeader = request.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        return Response.json({ error: "Missing Authorization header" }, { status: 401 });
+      }
+      const oidcToken = authHeader.slice(7);
+
+      // 2. Verify OIDC token against GitHub's JWKS.
+      const JWKS = jose.createRemoteJWKSet(
+        new URL(`${GITHUB_OIDC_ISSUER}/.well-known/jwks`)
+      );
+
+      const { payload } = await jose.jwtVerify(oidcToken, JWKS, {
+        issuer: GITHUB_OIDC_ISSUER,
+        audience: "clanopy",
+      });
+
+      // 3. Extract repository from OIDC claims.
+      const repository = payload.repository as string | undefined;
+      if (!repository) {
+        return Response.json({ error: "No repository claim in OIDC token" }, { status: 400 });
+      }
+
+      // 4. Generate GitHub App JWT.
+      const appJwt = await generateAppJwt(env.APP_ID, env.APP_PRIVATE_KEY);
+
+      // 5. Find the installation for this repository.
+      const installationId = await findInstallation(appJwt, repository);
+      if (!installationId) {
+        return Response.json(
+          { error: `Clanopy Review app is not installed on ${repository}` },
+          { status: 404 }
+        );
+      }
+
+      // 6. Generate a scoped installation token.
+      const [owner, repo] = repository.split("/");
+      const tokenResponse = await fetch(
+        `${GITHUB_API}/app/installations/${installationId}/access_tokens`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${appJwt}`,
+            Accept: "application/vnd.github+json",
+            "User-Agent": "clanopy-token-proxy",
+          },
+          body: JSON.stringify({
+            repositories: [repo],
+            permissions: { pull_requests: "write", contents: "read" },
+          }),
+        }
+      );
+
+      if (!tokenResponse.ok) {
+        const body = await tokenResponse.text();
+        return Response.json(
+          { error: `Failed to create installation token: ${body}` },
+          { status: 502 }
+        );
+      }
+
+      const tokenData = (await tokenResponse.json()) as { token: string };
+      return Response.json({ token: tokenData.token });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  },
+};
+
+async function generateAppJwt(appId: string, privateKeyPem: string): Promise<string> {
+  const privateKey = await jose.importPKCS8(privateKeyPem, "RS256");
+  const now = Math.floor(Date.now() / 1000);
+
+  return new jose.SignJWT({})
+    .setProtectedHeader({ alg: "RS256" })
+    .setIssuer(appId)
+    .setIssuedAt(now - 60)
+    .setExpirationTime(now + 600)
+    .sign(privateKey);
+}
+
+async function findInstallation(
+  appJwt: string,
+  repository: string
+): Promise<number | null> {
+  // Try the direct repo installation endpoint first.
+  const response = await fetch(
+    `${GITHUB_API}/repos/${repository}/installation`,
+    {
+      headers: {
+        Authorization: `Bearer ${appJwt}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "clanopy-token-proxy",
+      },
+    }
+  );
+
+  if (response.ok) {
+    const data = (await response.json()) as { id: number };
+    return data.id;
+  }
+
+  return null;
+}

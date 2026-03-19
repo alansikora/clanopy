@@ -146,6 +146,20 @@ The `evaluation` section is optional. When set, `code_change.context` is injecte
 
 Add automated PR reviews to your CI:
 
+```bash
+clanopy review init
+```
+
+This walks you through:
+1. Installing the **Clanopy Review** app — reviews appear as `clanopy-review[bot]`
+2. Setting up Claude authentication (OAuth or API key)
+3. Creating a PR with the workflow and review config
+
+No secrets to manage beyond Claude auth. The Clanopy Review app generates tokens automatically via OIDC.
+
+<details>
+<summary>Manual workflow setup</summary>
+
 ```yaml
 # .github/workflows/clanopy-review.yml
 name: Clanopy Review
@@ -154,8 +168,8 @@ on:
     types: [opened, synchronize]
 
 permissions:
-  pull-requests: write
   contents: read
+  id-token: write
 
 jobs:
   review:
@@ -164,15 +178,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: alansikora/clanopy@v1
         with:
-          # Use Claude access token (from /install-github-app)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Or use an API key instead:
-          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Optional: enables auto-resolving fixed review threads (see below)
-          github_token: ${{ secrets.CLANOPY_GH_PAT_TOKEN || github.token }}
 ```
 
-> **Auto-resolving review threads:** When clanopy detects a finding has been fixed, it tries to resolve the GitHub review thread automatically. The default `GITHUB_TOKEN` may not have permission for this. To enable it, create a [Fine-grained PAT](https://github.com/settings/personal-access-tokens) with **Pull requests: Read and write** permission, add it as a repo secret named `CLANOPY_GH_PAT_TOKEN`, and uncomment the `github_token` line above.
+The `id-token: write` permission enables the action to authenticate with the Clanopy Review app. Without it (or without the app installed), reviews fall back to `github-actions[bot]`.
+
+</details>
 
 ### Fix workflow
 

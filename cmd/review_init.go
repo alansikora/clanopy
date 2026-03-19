@@ -26,7 +26,12 @@ var reviewInitCmd = &cobra.Command{
 		repo := strings.TrimSpace(string(repoOut))
 		fmt.Fprintf(os.Stderr, "Setting up clanopy review for %s\n\n", repo)
 
-		// 2. Check for auth secret.
+		// 2. Install the Clanopy Review App for bot identity.
+		if err := auth.InstallClanopyReviewApp(repo); err != nil {
+			return fmt.Errorf("installing Clanopy Review app: %w", err)
+		}
+
+		// 3. Check for Claude auth secret.
 		secretName := "CLAUDE_CODE_OAUTH_TOKEN"
 		if useAPIKey {
 			secretName = "ANTHROPIC_API_KEY"
@@ -69,7 +74,7 @@ var reviewInitCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "  %s secret found on %s\n\n", secretName, repo)
 		}
 
-		// 3. Create workflow file.
+		// 4. Create workflow file.
 		workflowDir := filepath.Join(".github", "workflows")
 		workflowPath := filepath.Join(workflowDir, "clanopy-review.yml")
 
@@ -91,8 +96,8 @@ on:
     types: [opened, synchronize]
 
 permissions:
-  pull-requests: write
   contents: read
+  id-token: write
 
 jobs:
   review:
@@ -103,8 +108,6 @@ jobs:
       - uses: alansikora/clanopy@%s
         with:
 %s
-          # Optional: enables auto-resolving fixed review threads.
-          github_token: ${{ secrets.CLANOPY_GH_PAT_TOKEN || github.token }}
           config_path: .clanopy/review.yml
 `, actionRef, authEnv)
 
@@ -112,15 +115,16 @@ jobs:
 			return fmt.Errorf("creating workflow directory: %w", err)
 		}
 
-		workflowCreated := false
-		if _, err := os.Stat(workflowPath); err == nil {
-			fmt.Fprintf(os.Stderr, "  %s already exists, skipping\n", workflowPath)
+		_, existsErr := os.Stat(workflowPath)
+		workflowExisted := existsErr == nil
+		if err := os.WriteFile(workflowPath, []byte(workflow), 0644); err != nil {
+			return fmt.Errorf("writing workflow file: %w", err)
+		}
+		workflowCreated := true
+		if workflowExisted {
+			fmt.Fprintf(os.Stderr, "  Updated %s\n", workflowPath)
 		} else {
-			if err := os.WriteFile(workflowPath, []byte(workflow), 0644); err != nil {
-				return fmt.Errorf("writing workflow file: %w", err)
-			}
 			fmt.Fprintf(os.Stderr, "  Created %s\n", workflowPath)
-			workflowCreated = true
 		}
 
 		// 4. Generate review config using Claude (fall back to static template).
