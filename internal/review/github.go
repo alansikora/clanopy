@@ -221,34 +221,8 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string, co
 	}
 
 	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
-	if _, err := ghAPIPOST(apiPath, payloadJSON); err != nil && len(comments) > 0 {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "422") || strings.Contains(errMsg, "Validation Failed") || strings.Contains(errMsg, "Unprocessable Entity") {
-			fmt.Fprintf(os.Stderr, "Warning: inline comments failed validation, retrying with body-only review\n")
-			fmt.Fprintf(os.Stderr, "  API error: %v\n", err)
-
-			noInline := func(f Finding) bool { return false }
-			fallbackBody := FormatReviewBody(result, noInline)
-			fallbackPayload := reviewPayload{
-				Event:    "COMMENT",
-				Body:     fallbackBody,
-				Comments: make([]reviewComment, 0),
-				CommitID: commitSHA,
-			}
-			fallbackJSON, marshalErr := json.Marshal(fallbackPayload)
-			if marshalErr != nil {
-				return fmt.Errorf("marshaling fallback payload: %w (original error: %v)", marshalErr, err)
-			}
-			if _, fallbackErr := ghAPIPOST(apiPath, fallbackJSON); fallbackErr != nil {
-				return fmt.Errorf("fallback review also failed: %w (original: %v)", fallbackErr, err)
-			}
-			return nil
-		}
-		return err
-	} else if err != nil {
-		return err
-	}
-	return nil
+	_, err = ghAPIPOST(apiPath, payloadJSON)
+	return err
 }
 
 // FetchReviewFromPR extracts cached review data from a PR review's hidden HTML tag.
@@ -594,6 +568,20 @@ func postSimpleReview(repo string, prNumber int, body string) error {
 	return err
 }
 
+// apiError is returned by ghAPIPOST so callers can inspect the stderr output
+// from gh (which contains the HTTP status line) separately from the response body.
+type apiError struct {
+	Err      error
+	Stderr   string
+	Response string
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("gh api: %v\nstderr: %s\nresponse: %s", e.Err, e.Stderr, e.Response)
+}
+
+func (e *apiError) Unwrap() error { return e.Err }
+
 // ghAPIPOST sends a JSON payload to the GitHub API via gh, using a temp file
 // to avoid stdin pipe issues that can cause "unexpected end of JSON input"
 // errors on large payloads.
@@ -620,7 +608,7 @@ func ghAPIPOST(apiPath string, payloadJSON []byte) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), fmt.Errorf("gh api create review: %w\nstderr: %s\nresponse: %s", err, stderr.String(), stdout.String())
+		return stdout.Bytes(), &apiError{Err: err, Stderr: stderr.String(), Response: stdout.String()}
 	}
 	return stdout.Bytes(), nil
 }
