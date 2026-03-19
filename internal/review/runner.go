@@ -369,6 +369,8 @@ func Run(opts RunOptions) error {
 				if minimized > 0 {
 					fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", minimized)
 				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: could not fetch reviews for minimization: %v\n", err)
 			}
 		}
 
