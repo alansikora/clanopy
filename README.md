@@ -68,23 +68,33 @@ clanopy review 42 --dry-run    # show the prompt without calling Claude
 
 ### Re-reviews
 
-When reviewing a PR that already has clanopy findings, clanopy runs an incremental review:
+When reviewing a PR that already has clanopy findings, clanopy uses a **per-comment triage** system that maximizes determinism and minimizes Claude API costs:
 
-1. **Re-evaluates** existing unresolved findings against the new changes and automatically resolves threads that have been fixed
-2. **Reviews** only the incremental diff, excluding known unresolved issues to avoid duplicate reports
-3. Posts an **all clear** if every finding has been addressed and no new issues are found
+1. **Go-driven triage** — Each unresolved thread is classified using GitHub's `outdated` flag and human reply detection. Threads where the code hasn't changed and nobody replied are skipped entirely — **zero Claude calls**.
+2. **Per-thread evaluation** — Only threads that need it get a focused Claude call. Each evaluation type gets a specialized prompt (code change, human reply, or both). Evaluations run in **parallel** for speed.
+3. **Incremental review** — Reviews only the new diff, with context about what was just resolved to prevent ping-ponging.
+4. Posts an **all clear** if every finding has been addressed and no new issues are found.
 
-Progress is logged to stderr:
+Progress is logged per-thread to stderr:
 
 ```
 Re-reviewing PR #42 (5 unresolved threads, base a1b2c3d4)
-Evaluating 5 previous findings against new changes...
-Result: 3 fixed, 2 still open
-  ✓ 🟡 **warning** — `missing-error-handling` — resolved
-  ✓ ⚪ **nitpick** — `redundant-nesting` — resolved
-  ✓ ⚪ **nitpick** — `unclear-variable-name` — resolved
-Reviewing new changes (2 known issues excluded)...
-Found 1 new findings
+Re-evaluating 5 unresolved thread(s)...
+
+  [skip]     internal/review/runner.go:42 — "Missing error check" — no code changes, no human replies
+  [skip]     internal/review/prompt.go:15 — "Unused parameter" — no code changes, no human replies
+  [evaluate] internal/review/github.go:88 — "SQL injection risk" — code changes detected
+  [evaluate] cmd/review.go:33 — "Race condition" — human reply detected
+  [evaluate] internal/config/load.go:12 — "Nil pointer" — code changes + human reply detected
+
+Triage result: 2 skipped, 3 need evaluation
+
+  [resolved] internal/review/github.go:88 — fixed (code change)
+  [resolved] cmd/review.go:33 — rebutted (author rebutted)
+  [open]     internal/config/load.go:12 — not resolved
+
+Reviewing new changes (1 known issues excluded)...
+Found 0 new findings
 Review posted to PR #42
 ```
 
@@ -115,9 +125,22 @@ ignore:
   - "*.lock"
 
 max_findings: 50
+
+# Optional: customize how re-evaluation prompts behave per type
+evaluation:
+  code_change:
+    context: |
+      Error handling fixes should use the custom errors package.
+      A fix that just adds a nil check without errors.Wrap is incomplete.
+  reply:
+    context: |
+      This team uses "WONTFIX" to indicate intentional non-fixes.
+      Treat "WONTFIX" as an acknowledgment.
 ```
 
 Without a config file, Claude performs a general code review.
+
+The `evaluation` section is optional. When set, `code_change.context` is injected into prompts that evaluate whether a code change fixed a finding, and `reply.context` is injected into prompts that evaluate author replies.
 
 ### GitHub Action
 
