@@ -220,6 +220,8 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string, co
 		return fmt.Errorf("invalid repo format %q, expected owner/name", repo)
 	}
 
+	// No fallback — if this fails, the apiError carries stderr and response
+	// body so the caller surfaces full diagnostics for debugging.
 	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
 	_, err = ghAPIPOST(apiPath, payloadJSON)
 	return err
