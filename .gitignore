@@ -1,3 +1,6 @@
 clanopy
 .clanopy/reviews/
 .claude/worktrees/
+
+# clanopy
+.clanopy/**/*.bak
