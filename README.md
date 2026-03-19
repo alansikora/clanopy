@@ -181,7 +181,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-The `id-token: write` permission enables the action to authenticate with the Clanopy Review app. Without it (or without the app installed), reviews fall back to `github-actions[bot]`.
+The `id-token: write` permission is required for the action to authenticate with the Clanopy Review app. The app must be installed on the repo — run `clanopy review init` to set everything up.
 
 </details>
 
