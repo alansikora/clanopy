@@ -90,6 +90,11 @@ export default {
 };
 
 async function generateAppJwt(appId: string, privateKeyPem: string): Promise<string> {
+  if (privateKeyPem.includes("BEGIN RSA PRIVATE KEY")) {
+    throw new Error(
+      "APP_PRIVATE_KEY is in PKCS#1 format. Convert to PKCS#8 with: openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem"
+    );
+  }
   const privateKey = await jose.importPKCS8(privateKeyPem, "RS256");
   const now = Math.floor(Date.now() / 1000);
 
