@@ -56,33 +56,58 @@ func runClaude(prompt string, env []string) ([]byte, error) {
 	return output, nil
 }
 
-// parseFixedThreads extracts thread ID strings (e.g. "thread-0") from Claude's
-// JSON response and returns the corresponding integer indices.
-func parseFixedThreads(output string) []int {
+// fixedThread holds the index and resolution reason for a fixed thread.
+type fixedThread struct {
+	Index  int
+	Reason string // "code_change", "acknowledged", "rebutted", or "" for unknown
+}
+
+// parseFixedThreads extracts thread IDs and reasons from Claude's JSON response.
+// It supports the object format [{"thread":"thread-0","reason":"code_change"}]
+// and falls back to the legacy string format ["thread-0"].
+func parseFixedThreads(output string) []fixedThread {
 	allMatches := jsonFenceRe.FindAllStringSubmatch(output, -1)
 	for _, matches := range allMatches {
+		raw := matches[1]
+
+		// Try object format first.
+		var objs []struct {
+			Thread string `json:"thread"`
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(raw), &objs); err == nil && len(objs) > 0 && objs[0].Thread != "" {
+			var result []fixedThread
+			for _, obj := range objs {
+				var idx int
+				if _, err := fmt.Sscanf(obj.Thread, "thread-%d", &idx); err == nil {
+					result = append(result, fixedThread{Index: idx, Reason: obj.Reason})
+				}
+			}
+			return result
+		}
+
+		// Fall back to legacy string array format.
 		var refs []string
-		if err := json.Unmarshal([]byte(matches[1]), &refs); err != nil {
+		if err := json.Unmarshal([]byte(raw), &refs); err != nil {
 			continue
 		}
-		var indices []int
+		var result []fixedThread
 		for _, ref := range refs {
 			var idx int
 			if _, err := fmt.Sscanf(ref, "thread-%d", &idx); err == nil {
-				indices = append(indices, idx)
+				result = append(result, fixedThread{Index: idx})
 			}
 		}
-		return indices
+		return result
 	}
 	return nil
 }
 
 // allResolved checks if all clanopy threads have been resolved.
-// fixedIndices are the sequential indices into the threads slice that were fixed.
-func allResolved(threads []ReviewThread, fixedIndices []int) bool {
-	fixedSet := make(map[int]bool, len(fixedIndices))
-	for _, idx := range fixedIndices {
-		fixedSet[idx] = true
+func allResolved(threads []ReviewThread, fixed []fixedThread) bool {
+	fixedSet := make(map[int]bool, len(fixed))
+	for _, f := range fixed {
+		fixedSet[f.Index] = true
 	}
 	for i := range threads {
 		if !fixedSet[i] {
@@ -94,7 +119,7 @@ func allResolved(threads []ReviewThread, fixedIndices []int) bool {
 
 // resolvedFindingIDs builds the set of finding IDs that are resolved.
 // It combines threads already resolved on GitHub with threads just fixed by re-evaluation.
-func resolvedFindingIDs(allThreads, unresolved []ReviewThread, fixedIndices []int) map[string]bool {
+func resolvedFindingIDs(allThreads, unresolved []ReviewThread, fixed []fixedThread) map[string]bool {
 	resolved := make(map[string]bool)
 	for _, t := range allThreads {
 		if t.Resolved {
@@ -103,9 +128,9 @@ func resolvedFindingIDs(allThreads, unresolved []ReviewThread, fixedIndices []in
 			}
 		}
 	}
-	fixedSet := make(map[int]bool, len(fixedIndices))
-	for _, idx := range fixedIndices {
-		fixedSet[idx] = true
+	fixedSet := make(map[int]bool, len(fixed))
+	for _, f := range fixed {
+		fixedSet[f.Index] = true
 	}
 	for i, t := range unresolved {
 		if fixedSet[i] {
@@ -222,7 +247,7 @@ func Run(opts RunOptions) error {
 	previousSHA := FetchPreviousReviewSHA(repo, opts.PRNumber)
 
 	var prompt string
-	var fixedIndices []int
+	var fixed []fixedThread
 	// reviewDiff is the diff used to resolve inline comment positions.
 	// Defaults to the full PR diff; overridden with the incremental diff
 	// when on the incremental path so that line positions match findings.
@@ -250,11 +275,11 @@ func Run(opts RunOptions) error {
 		} else {
 			reevalOutput, err := runClaude(reevalPrompt, env)
 			if err == nil {
-				fixedIndices = parseFixedThreads(string(reevalOutput))
-				fmt.Fprintf(os.Stderr, "Result: %d fixed, %d still open\n", len(fixedIndices), len(clanopyThreads)-len(fixedIndices))
-				for _, idx := range fixedIndices {
-					if idx >= 0 && idx < len(clanopyThreads) {
-						t := clanopyThreads[idx]
+				fixed = parseFixedThreads(string(reevalOutput))
+				fmt.Fprintf(os.Stderr, "Result: %d fixed, %d still open\n", len(fixed), len(clanopyThreads)-len(fixed))
+				for _, f := range fixed {
+					if f.Index >= 0 && f.Index < len(clanopyThreads) {
+						t := clanopyThreads[f.Index]
 						label := t.Path
 						if firstLine := t.Body; firstLine != "" {
 							if nl := strings.Index(firstLine, "\n"); nl >= 0 {
@@ -262,14 +287,27 @@ func Run(opts RunOptions) error {
 							}
 							label = firstLine
 						}
+						verb := "resolved"
+						reasonSuffix := ""
+						switch f.Reason {
+						case "code_change":
+							verb = "fixed"
+							reasonSuffix = " (code change)"
+						case "acknowledged":
+							verb = "acknowledged"
+							reasonSuffix = " (author acknowledged)"
+						case "rebutted":
+							verb = "rebutted"
+							reasonSuffix = " (author rebutted)"
+						}
 						if err := ResolveThread(t.ID); err != nil {
 							if strings.Contains(err.Error(), "Resource not accessible") {
-								fmt.Fprintf(os.Stderr, "  ~ %s — fixed (auto-resolve unavailable: token lacks permission)\n", label)
+								fmt.Fprintf(os.Stderr, "  ~ %s — %s%s (auto-resolve unavailable: token lacks permission)\n", label, verb, reasonSuffix)
 							} else {
-								fmt.Fprintf(os.Stderr, "  ! %s — fixed, but failed to resolve thread: %v\n", label, err)
+								fmt.Fprintf(os.Stderr, "  ! %s — %s%s, but failed to resolve thread: %v\n", label, verb, reasonSuffix, err)
 							}
 						} else {
-							fmt.Fprintf(os.Stderr, "  ✓ %s — resolved\n", label)
+							fmt.Fprintf(os.Stderr, "  ✓ %s — %s%s\n", label, verb, reasonSuffix)
 						}
 					}
 				}
@@ -279,10 +317,10 @@ func Run(opts RunOptions) error {
 		}
 
 		// Phase 2: Build review prompt.
-		fixedSet := make(map[int]bool, len(fixedIndices))
-		for _, idx := range fixedIndices {
-			if idx >= 0 && idx < len(clanopyThreads) {
-				fixedSet[idx] = true
+		fixedSet := make(map[int]bool, len(fixed))
+		for _, f := range fixed {
+			if f.Index >= 0 && f.Index < len(clanopyThreads) {
+				fixedSet[f.Index] = true
 			}
 		}
 		var unresolved []ReviewThread
@@ -351,7 +389,7 @@ func Run(opts RunOptions) error {
 
 	// Handle zero-findings scenarios.
 	if len(findings) == 0 && opts.Post {
-		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixedIndices) {
+		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixed) {
 			// Re-review: all resolved — minimize old reviews and post all-clear.
 			minimizeFailed := false
 			if nodeIDs, err := FindClanopyReviewNodeIDs(repo, opts.PRNumber); err == nil {
@@ -377,13 +415,13 @@ func Run(opts RunOptions) error {
 		if len(clanopyThreads) > 0 {
 			// Re-review: some threads still unresolved, no new findings.
 			// Minimize reviews whose findings are ALL resolved.
-			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixedIndices)
+			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixed)
 			minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
 
-			fixedSet := make(map[int]bool, len(fixedIndices))
-			for _, idx := range fixedIndices {
-				if idx >= 0 && idx < len(clanopyThreads) {
-					fixedSet[idx] = true
+			fixedSet := make(map[int]bool, len(fixed))
+			for _, f := range fixed {
+				if f.Index >= 0 && f.Index < len(clanopyThreads) {
+					fixedSet[f.Index] = true
 				}
 			}
 			unresolvedCount := len(clanopyThreads) - len(fixedSet)
@@ -424,7 +462,7 @@ func Run(opts RunOptions) error {
 	if opts.Post {
 		// Minimize previous clanopy reviews whose findings are ALL resolved.
 		if len(clanopyThreads) > 0 {
-			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixedIndices)
+			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixed)
 			minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
 		}
 

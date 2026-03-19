@@ -122,11 +122,12 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 	b.WriteString("A finding should be resolved if ANY of the following apply:\n")
 	b.WriteString("1. **Fixed by code changes** — the new diff addresses the issue.\n")
 	b.WriteString("2. **Acknowledged by the author** — a human reply indicates the finding is intentional, accepted as-is, or will be addressed separately (e.g. \"that's fine\", \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\").\n")
-	b.WriteString("3. **Rebutted by the author** — a human reply provides a concrete technical explanation showing the finding's premise is incorrect (e.g. the behaviour the finding warns about cannot actually occur due to how a framework or library works). A vague disagreement like \"I don't think so\" does NOT qualify — the reply must include specific technical reasoning.\n\n")
+	b.WriteString("3. **Rebutted by the author** — a human reply provides a concrete technical explanation showing the finding is not applicable, the concern is mitigated, or the tradeoff is justified in this context (e.g. the behaviour cannot occur due to framework semantics, the impact is negligible because of how the system is configured, or a project convention makes the approach intentional). A vague disagreement like \"I don't think so\" does NOT qualify — the reply must cite specific technical details, framework behaviour, or project constraints.\n\n")
 	b.WriteString("A reply that merely asks a question or expresses disagreement without substantive technical reasoning should NOT count.\n\n")
-	b.WriteString("Return a JSON array of thread ID strings for findings that should be resolved inside a ```json code fence.\n")
+	b.WriteString("Return a JSON array of objects for findings that should be resolved inside a ```json code fence.\n")
+	b.WriteString("Each object must have `thread` (the thread ID) and `reason` (one of `code_change`, `acknowledged`, or `rebutted`).\n")
 	b.WriteString("If none should be resolved, return an empty array: `[]`.\n\n")
-	b.WriteString("Example:\n```json\n[\"thread-0\", \"thread-2\"]\n```\n")
+	b.WriteString("Example:\n```json\n[{\"thread\": \"thread-0\", \"reason\": \"code_change\"}, {\"thread\": \"thread-2\", \"reason\": \"rebutted\"}]\n```\n")
 
 	return b.String()
 }
