@@ -177,16 +177,20 @@ jobs:
 			bullets = append(bullets, "- Update `.gitignore` with clanopy entries")
 		}
 
+		if len(filesToAdd) == 0 {
+			return fmt.Errorf("internal error: no files to stage")
+		}
+
 		branch := "clanopy/review-setup"
 		fmt.Fprintf(os.Stderr, "\nCreating PR...\n")
 
-		// Create branch (or reset if it exists from a prior partial run), add files, commit, push, create PR.
-		if out, err := exec.Command("git", "checkout", "-B", branch).CombinedOutput(); err != nil {
-			return fmt.Errorf("creating branch: %s\n%s", err, string(out))
+		// Check if branch already exists from a prior run.
+		if err := exec.Command("git", "show-ref", "--verify", "refs/heads/"+branch).Run(); err == nil {
+			return fmt.Errorf("branch %s already exists — delete it with `git branch -D %s` to retry", branch, branch)
 		}
 
-		if len(filesToAdd) == 0 {
-			return fmt.Errorf("internal error: no files to stage")
+		if out, err := exec.Command("git", "checkout", "-b", branch).CombinedOutput(); err != nil {
+			return fmt.Errorf("creating branch: %s\n%s", err, string(out))
 		}
 		if out, err := exec.Command("git", append([]string{"add"}, filesToAdd...)...).CombinedOutput(); err != nil {
 			return fmt.Errorf("staging files: %s\n%s", err, string(out))
