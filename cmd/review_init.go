@@ -112,6 +112,7 @@ jobs:
 			return fmt.Errorf("creating workflow directory: %w", err)
 		}
 
+		workflowCreated := false
 		if _, err := os.Stat(workflowPath); err == nil {
 			fmt.Fprintf(os.Stderr, "  %s already exists, skipping\n", workflowPath)
 		} else {
@@ -119,6 +120,7 @@ jobs:
 				return fmt.Errorf("writing workflow file: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "  Created %s\n", workflowPath)
+			workflowCreated = true
 		}
 
 		// 4. Generate review config using Claude (fall back to static template).
@@ -129,6 +131,7 @@ jobs:
 			return fmt.Errorf("creating config directory: %w", err)
 		}
 
+		configCreated := false
 		if _, err := os.Stat(configPath); err == nil {
 			fmt.Fprintf(os.Stderr, "  %s already exists, skipping\n", configPath)
 		} else {
@@ -144,21 +147,52 @@ jobs:
 				return fmt.Errorf("writing review config: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "  Created %s\n", configPath)
+			configCreated = true
 		}
 
-		// 5. Create a PR with the review setup.
+		// 5. Update .gitignore with clanopy entries.
+		gitignoreUpdated, err := updateGitignore()
+		if err != nil {
+			return fmt.Errorf("updating .gitignore: %w", err)
+		}
+
+		// 6. Create a PR with the review setup.
+		if !workflowCreated && !configCreated && !gitignoreUpdated {
+			fmt.Fprintf(os.Stderr, "\nReview setup is already complete — nothing to do.\n")
+			return nil
+		}
+
+		var filesToAdd []string
+		var bullets []string
+		if workflowCreated {
+			filesToAdd = append(filesToAdd, ".github/workflows/clanopy-review.yml")
+			bullets = append(bullets, "- Add Clanopy automated PR review workflow")
+		}
+		if configCreated {
+			filesToAdd = append(filesToAdd, ".clanopy/review.yml")
+			bullets = append(bullets, "- Add starter `.clanopy/review.yml` config")
+		}
+		if gitignoreUpdated {
+			filesToAdd = append(filesToAdd, ".gitignore")
+			bullets = append(bullets, "- Update `.gitignore` with clanopy entries")
+		}
+
+		if len(filesToAdd) == 0 {
+			return fmt.Errorf("internal error: no files to stage")
+		}
+
 		branch := "clanopy/review-setup"
 		fmt.Fprintf(os.Stderr, "\nCreating PR...\n")
 
-		// Create branch, add files, commit, push, create PR.
+		// Check if branch already exists from a prior run.
+		if err := exec.Command("git", "show-ref", "--verify", "refs/heads/"+branch).Run(); err == nil {
+			return fmt.Errorf("branch %s already exists — delete it with `git branch -D %s` to retry", branch, branch)
+		}
+
 		if out, err := exec.Command("git", "checkout", "-b", branch).CombinedOutput(); err != nil {
 			return fmt.Errorf("creating branch: %s\n%s", err, string(out))
 		}
-
-		if out, err := exec.Command("git", "add",
-			".github/workflows/clanopy-review.yml",
-			".clanopy/review.yml",
-		).CombinedOutput(); err != nil {
+		if out, err := exec.Command("git", append([]string{"add"}, filesToAdd...)...).CombinedOutput(); err != nil {
 			return fmt.Errorf("staging files: %s\n%s", err, string(out))
 		}
 
@@ -170,7 +204,7 @@ jobs:
 			return fmt.Errorf("pushing: %s\n%s", err, string(out))
 		}
 
-		prBody := "## Summary\n- Add Clanopy automated PR review workflow\n- Add starter `.clanopy/review.yml` config\n\nPRs will be automatically reviewed by Claude on open and update."
+		prBody := "## Summary\n" + strings.Join(bullets, "\n") + "\n\nPRs will be automatically reviewed by Claude on open and update."
 		prOut, err := exec.Command("gh", "pr", "create",
 			"--title", "Add Clanopy PR review",
 			"--body", prBody,
@@ -184,6 +218,48 @@ jobs:
 		fmt.Fprintf(os.Stderr, "\nDone! Merge the PR to enable automated reviews.\n")
 		return nil
 	},
+}
+
+func updateGitignore() (bool, error) {
+	entries := []string{
+		".clanopy/reviews/",
+		".clanopy/**/*.bak",
+	}
+
+	gitignorePath := ".gitignore"
+	existing := ""
+	if data, err := os.ReadFile(gitignorePath); err == nil {
+		existing = string(data)
+	}
+
+	var toAdd []string
+	for _, entry := range entries {
+		if !strings.Contains(existing, entry) {
+			toAdd = append(toAdd, entry)
+		}
+	}
+
+	if len(toAdd) == 0 {
+		fmt.Fprintf(os.Stderr, "  .gitignore already up to date\n")
+		return false, nil
+	}
+
+	// Ensure existing content ends with a newline before appending.
+	if existing != "" && !strings.HasSuffix(existing, "\n") {
+		existing += "\n"
+	}
+
+	prefix := "\n"
+	if existing == "" {
+		prefix = ""
+	}
+	section := prefix + "# clanopy\n" + strings.Join(toAdd, "\n") + "\n"
+	if err := os.WriteFile(gitignorePath, []byte(existing+section), 0644); err != nil {
+		return false, err
+	}
+
+	fmt.Fprintf(os.Stderr, "  Updated .gitignore\n")
+	return true, nil
 }
 
 func init() {
