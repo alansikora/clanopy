@@ -58,7 +58,7 @@ func runClaude(prompt string, env []string) ([]byte, error) {
 // fixedThread holds the index and resolution reason for a fixed thread.
 type fixedThread struct {
 	Index  int
-	Reason string // "code_change", "acknowledged", "rebutted", or "" for unknown
+	Reason string // "code_change", "dismissed", "acknowledged", "rebutted", or "" for unknown
 }
 
 // allResolved checks if all clanopy threads have been resolved.
