@@ -562,8 +562,10 @@ func FindClanopyReviewNodeIDs(repo string, prNumber int) ([]string, error) {
 
 // MinimizeComment hides a comment on GitHub using the minimizeComment GraphQL mutation.
 func MinimizeComment(nodeID string) error {
-	query := fmt.Sprintf(`mutation { minimizeComment(input: { subjectId: "%s", classifier: RESOLVED }) { minimizedComment { isMinimized } } }`, nodeID)
-	cmd := exec.Command("gh", "api", "graphql", "-f", "query="+query)
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query=mutation($id:ID!){minimizeComment(input:{subjectId:$id,classifier:RESOLVED}){minimizedComment{isMinimized}}}",
+		"-F", "id="+nodeID,
+	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh api graphql minimize: %w\n%s", err, string(out))
 	}

@@ -208,7 +208,9 @@ func Run(opts RunOptions) error {
 		// Phase 2: Build review prompt.
 		fixedSet := make(map[int]bool, len(fixedIndices))
 		for _, idx := range fixedIndices {
-			fixedSet[idx] = true
+			if idx >= 0 && idx < len(clanopyThreads) {
+				fixedSet[idx] = true
+			}
 		}
 		var unresolved []ReviewThread
 		for i, t := range clanopyThreads {
@@ -277,6 +279,8 @@ func Run(opts RunOptions) error {
 				if len(nodeIDs) > 0 {
 					fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", len(nodeIDs))
 				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: could not fetch reviews for minimization: %v\n", err)
 			}
 			if err := PostAllClearReview(repo, opts.PRNumber); err != nil {
 				return fmt.Errorf("posting all-clear review: %w", err)
