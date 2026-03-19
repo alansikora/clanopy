@@ -134,7 +134,7 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 	b.WriteString("4. **Rebutted by the author** — a human reply provides a concrete technical explanation showing the finding is not applicable, the concern is mitigated, or the tradeoff is justified in this context (e.g. the behaviour cannot occur due to framework semantics, the impact is negligible because of how the system is configured, or a project convention makes the approach intentional). A vague disagreement like \"I don't think so\" does NOT qualify — the reply must cite specific technical details, framework behaviour, or project constraints.\n\n")
 	b.WriteString("A reply that merely asks a question or expresses disagreement without substantive technical reasoning should NOT count.\n\n")
 	b.WriteString("Return a JSON array of objects for findings that should be resolved inside a ```json code fence.\n")
-	b.WriteString("Each object must have `thread` (the thread ID) and `reason` (one of `code_change`, `acknowledged`, or `rebutted`).\n")
+	b.WriteString("Each object must have `thread` (the thread ID) and `reason` (one of `code_change`, `dismissed`, `acknowledged`, or `rebutted`).\n")
 	b.WriteString("If none should be resolved, return an empty array: `[]`.\n\n")
 	b.WriteString("Example:\n```json\n[{\"thread\": \"thread-0\", \"reason\": \"code_change\"}, {\"thread\": \"thread-2\", \"reason\": \"rebutted\"}]\n```\n")
 
