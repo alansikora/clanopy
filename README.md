@@ -185,6 +185,27 @@ The `id-token: write` permission enables the action to authenticate with the Cla
 
 </details>
 
+<details>
+<summary>Self-hosted token proxy</summary>
+
+The Clanopy Review app uses a Cloudflare Worker at `token.clanopy.workers.dev` to generate GitHub App installation tokens via OIDC. The default proxy is hosted by the clanopy project and is free to use.
+
+If you prefer to run your own, the worker source is in the [`worker/`](worker/) directory:
+
+1. Create your own [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with `pull_requests: write` and `contents: read` permissions
+2. Create a free [Cloudflare](https://workers.cloudflare.com) account
+3. Deploy the worker and set secrets:
+   ```bash
+   cd worker
+   npm install
+   wrangler deploy
+   cat /path/to/private-key.pem | wrangler secret put APP_PRIVATE_KEY
+   wrangler secret put APP_ID
+   ```
+4. Update the proxy URL in your workflow's action reference or fork the action
+
+</details>
+
 ### Fix workflow
 
 Each review finding includes a fix command:
