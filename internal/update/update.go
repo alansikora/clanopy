@@ -192,13 +192,18 @@ func Upgrade(targetVersion string) error {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
-	// Find the download URL and expected checksum
-	assetURL, err := findAssetURL(targetVersion, osName, arch)
+	// Fetch the release asset list once
+	release, err := fetchReleaseAssets(targetVersion)
 	if err != nil {
 		return err
 	}
 
-	checksumURL, err := findChecksumURL(targetVersion)
+	assetURL, err := findAssetURLFrom(release, targetVersion, osName, arch)
+	if err != nil {
+		return err
+	}
+
+	checksumURL, err := findChecksumURLFrom(release, targetVersion)
 	if err != nil {
 		return err
 	}
@@ -344,13 +349,8 @@ func validateAssetURL(rawURL string) error {
 	return fmt.Errorf("asset URL host %q is not an allowed GitHub domain", u.Host)
 }
 
-// findAssetURL finds the download URL for a specific release asset.
-func findAssetURL(tag, osName, arch string) (string, error) {
-	release, err := fetchReleaseAssets(tag)
-	if err != nil {
-		return "", err
-	}
-
+// findAssetURLFrom finds the download URL for a specific release asset.
+func findAssetURLFrom(release *releaseAssets, tag, osName, arch string) (string, error) {
 	suffix := fmt.Sprintf("_%s_%s.tar.gz", osName, arch)
 	for _, a := range release.Assets {
 		if strings.HasSuffix(a.Name, suffix) {
@@ -363,13 +363,8 @@ func findAssetURL(tag, osName, arch string) (string, error) {
 	return "", fmt.Errorf("no asset found for %s/%s in release %s", osName, arch, tag)
 }
 
-// findChecksumURL finds the checksums.txt download URL for a release.
-func findChecksumURL(tag string) (string, error) {
-	release, err := fetchReleaseAssets(tag)
-	if err != nil {
-		return "", err
-	}
-
+// findChecksumURLFrom finds the checksums.txt download URL for a release.
+func findChecksumURLFrom(release *releaseAssets, tag string) (string, error) {
 	for _, a := range release.Assets {
 		if a.Name == "checksums.txt" {
 			if err := validateAssetURL(a.BrowserDownloadURL); err != nil {
@@ -436,13 +431,22 @@ func extractBinary(r io.Reader, dest string) error {
 			return err
 		}
 		if filepath.Base(hdr.Name) == "clanopy" && hdr.Typeflag == tar.TypeReg {
+			if hdr.Size > maxBinarySize {
+				return fmt.Errorf("binary too large: %d bytes (max %d)", hdr.Size, maxBinarySize)
+			}
 			f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 			if err != nil {
 				return err
 			}
 			defer f.Close()
-			_, err = io.Copy(f, io.LimitReader(tr, maxBinarySize))
-			return err
+			n, err := io.Copy(f, io.LimitReader(tr, maxBinarySize))
+			if err != nil {
+				return err
+			}
+			if hdr.Size > 0 && n < hdr.Size {
+				return fmt.Errorf("binary truncated: wrote %d of %d bytes", n, hdr.Size)
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("clanopy binary not found in archive")
