@@ -426,6 +426,7 @@ func Run(opts RunOptions) error {
 			if err := PostReview(repo, opts.PRNumber, result, pr.Diff, result.SHA); err != nil {
 				return fmt.Errorf("posting review: %w", err)
 			}
+			fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
 		} else if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixed) {
 			// Re-review: all resolved — post all-clear.
 			if err := PostAllClearReview(repo, opts.PRNumber, minimizeFailed); err != nil {
@@ -433,7 +434,7 @@ func Run(opts RunOptions) error {
 			}
 			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
 		} else if len(clanopyThreads) > 0 {
-			// Re-review: some still unresolved, no new findings.
+			// Re-review: some still unresolved, no new findings — nothing to post.
 			fixedSet := make(map[int]bool, len(fixed))
 			for _, f := range fixed {
 				if f.Index >= 0 && f.Index < len(clanopyThreads) {

@@ -125,7 +125,8 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 
 // fileInDiff checks if the diff contains changes to the given file path.
 func fileInDiff(diff, path string) bool {
-	return strings.Contains(diff, "+++ b/"+path)
+	target := "+++ b/" + path
+	return strings.Contains(diff, target+"\n") || strings.Contains(diff, target+"\t")
 }
 
 // hasHumanReply checks if a thread has at least one reply from a non-bot author.
