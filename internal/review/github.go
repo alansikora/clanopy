@@ -218,13 +218,7 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string) er
 		return fmt.Errorf("invalid repo format %q, expected owner/name", repo)
 	}
 
-	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
-	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--input", "-")
-	cmd.Stdin = strings.NewReader(string(payloadJSON))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("gh api create review: %w\n%s", err, string(out))
-	}
-	return nil
+	return ghAPIPOST(fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber), payloadJSON)
 }
 
 // FetchReviewFromPR extracts cached review data from a PR review's hidden HTML tag.
@@ -542,9 +536,31 @@ func postSimpleReview(repo string, prNumber int, body string) error {
 		return fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
-	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--input", "-")
-	cmd.Stdin = strings.NewReader(string(payloadJSON))
+	return ghAPIPOST(fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber), payloadJSON)
+}
+
+// ghAPIPOST sends a JSON payload to the GitHub API via gh, using a temp file
+// to avoid stdin pipe issues that can cause "unexpected end of JSON input"
+// errors on large payloads.
+func ghAPIPOST(apiPath string, payloadJSON []byte) error {
+	dir, err := os.MkdirTemp("", "clanopy-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	tmpFile, err := os.CreateTemp(dir, "payload.json")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+
+	if _, err := tmpFile.Write(payloadJSON); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing payload to temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--input", tmpFile.Name())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh api create review: %w\n%s", err, string(out))
 	}
