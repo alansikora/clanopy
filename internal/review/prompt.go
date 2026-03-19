@@ -119,9 +119,11 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 
 	b.WriteString("## Task\n")
 	b.WriteString("Determine which of the previous findings should be resolved.\n\n")
-	b.WriteString("A finding should be resolved if EITHER:\n")
+	b.WriteString("A finding should be resolved if ANY of the following apply:\n")
 	b.WriteString("1. **Fixed by code changes** — the new diff addresses the issue.\n")
-	b.WriteString("2. **Acknowledged by the author** — a human reply indicates the finding is intentional, accepted as-is, or will be addressed separately (e.g. \"that's fine\", \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\"). A reply that merely asks a question or disputes the finding without a clear resolution should NOT count.\n\n")
+	b.WriteString("2. **Acknowledged by the author** — a human reply indicates the finding is intentional, accepted as-is, or will be addressed separately (e.g. \"that's fine\", \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\").\n")
+	b.WriteString("3. **Rebutted by the author** — a human reply provides a concrete technical explanation showing the finding's premise is incorrect (e.g. the behaviour the finding warns about cannot actually occur due to how a framework or library works). A vague disagreement like \"I don't think so\" does NOT qualify — the reply must include specific technical reasoning.\n\n")
+	b.WriteString("A reply that merely asks a question or expresses disagreement without substantive technical reasoning should NOT count.\n\n")
 	b.WriteString("Return a JSON array of thread ID strings for findings that should be resolved inside a ```json code fence.\n")
 	b.WriteString("If none should be resolved, return an empty array: `[]`.\n\n")
 	b.WriteString("Example:\n```json\n[\"thread-0\", \"thread-2\"]\n```\n")
