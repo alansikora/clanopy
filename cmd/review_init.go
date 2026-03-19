@@ -146,8 +146,9 @@ jobs:
 			fmt.Fprintf(os.Stderr, "  Created %s\n", configPath)
 		}
 
-		// 5. Update .gitignore with clanopy/claude entries.
-		if err := updateGitignore(); err != nil {
+		// 5. Update .gitignore with clanopy entries.
+		gitignoreUpdated, err := updateGitignore()
+		if err != nil {
 			return fmt.Errorf("updating .gitignore: %w", err)
 		}
 
@@ -160,11 +161,14 @@ jobs:
 			return fmt.Errorf("creating branch: %s\n%s", err, string(out))
 		}
 
-		if out, err := exec.Command("git", "add",
+		filesToAdd := []string{
 			".github/workflows/clanopy-review.yml",
 			".clanopy/review.yml",
-			".gitignore",
-		).CombinedOutput(); err != nil {
+		}
+		if gitignoreUpdated {
+			filesToAdd = append(filesToAdd, ".gitignore")
+		}
+		if out, err := exec.Command("git", append([]string{"add"}, filesToAdd...)...).CombinedOutput(); err != nil {
 			return fmt.Errorf("staging files: %s\n%s", err, string(out))
 		}
 
@@ -192,7 +196,7 @@ jobs:
 	},
 }
 
-func updateGitignore() error {
+func updateGitignore() (bool, error) {
 	entries := []string{
 		".clanopy/reviews/",
 		".clanopy/**/*.bak",
@@ -213,7 +217,7 @@ func updateGitignore() error {
 
 	if len(toAdd) == 0 {
 		fmt.Fprintf(os.Stderr, "  .gitignore already up to date\n")
-		return nil
+		return false, nil
 	}
 
 	// Ensure existing content ends with a newline before appending.
@@ -221,13 +225,17 @@ func updateGitignore() error {
 		existing += "\n"
 	}
 
-	section := "\n# clanopy\n" + strings.Join(toAdd, "\n") + "\n"
+	prefix := "\n"
+	if existing == "" {
+		prefix = ""
+	}
+	section := prefix + "# clanopy\n" + strings.Join(toAdd, "\n") + "\n"
 	if err := os.WriteFile(gitignorePath, []byte(existing+section), 0644); err != nil {
-		return err
+		return false, err
 	}
 
 	fmt.Fprintf(os.Stderr, "  Updated .gitignore\n")
-	return nil
+	return true, nil
 }
 
 func init() {
