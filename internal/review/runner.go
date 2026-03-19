@@ -323,9 +323,11 @@ func Run(opts RunOptions) error {
 				fixedSet[f.Index] = true
 			}
 		}
-		var unresolved []ReviewThread
+		var unresolved, resolved []ReviewThread
 		for i, t := range clanopyThreads {
-			if !fixedSet[i] {
+			if fixedSet[i] {
+				resolved = append(resolved, t)
+			} else {
 				unresolved = append(unresolved, t)
 			}
 		}
@@ -344,7 +346,7 @@ func Run(opts RunOptions) error {
 				}
 			}
 			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issues excluded)...\n", len(unresolved))
-			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles)
+			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, resolved, opts.PRNumber, startIndex, incContents, incFiles)
 			reviewDiff = incrementalDiff
 		}
 	} else {

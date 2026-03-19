@@ -134,7 +134,7 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 
 // BuildIncrementalPrompt reviews only new code, avoiding duplicate reports.
 // startIndex is the number of existing findings so fix_ref numbering continues.
-func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, prNumber int, startIndex int, fileContents map[string]string, files []string) string {
+func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, resolvedThreads []ReviewThread, prNumber int, startIndex int, fileContents map[string]string, files []string) string {
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. Review ONLY the following incremental changes and report NEW findings.\n")
@@ -188,6 +188,20 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 		b.WriteString("These issues are already reported and unresolved. Do NOT report them again:\n\n")
 		for _, t := range knownIssues {
 			fmt.Fprintf(&b, "- `%s:%d`\n", t.Path, t.Line)
+		}
+		b.WriteString("\n")
+	}
+
+	// Previously applied suggestions to avoid contradicting.
+	if len(resolvedThreads) > 0 {
+		b.WriteString("## Previously Applied Suggestions (DO NOT CONTRADICT)\n")
+		b.WriteString("The following findings from prior reviews were just resolved because the author implemented the suggested changes. The incremental diff may contain code that was added or modified to address these suggestions. Do NOT flag this code as problematic unless there is a genuinely new issue completely unrelated to the original suggestion. In particular, NEVER suggest reverting or removing code that was added to implement a prior suggestion.\n\n")
+		for _, t := range resolvedThreads {
+			firstLine := t.Body
+			if idx := strings.Index(t.Body, "\n"); idx >= 0 {
+				firstLine = t.Body[:idx]
+			}
+			fmt.Fprintf(&b, "- `%s:%d` — %s\n", t.Path, t.Line, firstLine)
 		}
 		b.WriteString("\n")
 	}
