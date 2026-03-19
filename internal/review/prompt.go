@@ -107,6 +107,9 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 			firstLine = t.Body[:idx]
 		}
 		fmt.Fprintf(&b, "  %s\n", firstLine)
+		for _, r := range t.Replies {
+			fmt.Fprintf(&b, "  > **@%s** replied: %s\n", r.Author, r.Body)
+		}
 	}
 
 	b.WriteString("\n## Changes Since Last Review\n```diff\n")
@@ -114,9 +117,12 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 	b.WriteString("\n```\n\n")
 
 	b.WriteString("## Task\n")
-	b.WriteString("Determine which of the previous findings have been fixed by the new changes.\n\n")
-	b.WriteString("Return a JSON array of thread ID strings for findings that are NOW FIXED inside a ```json code fence.\n")
-	b.WriteString("If none are fixed, return an empty array: `[]`.\n\n")
+	b.WriteString("Determine which of the previous findings should be resolved.\n\n")
+	b.WriteString("A finding should be resolved if EITHER:\n")
+	b.WriteString("1. **Fixed by code changes** — the new diff addresses the issue.\n")
+	b.WriteString("2. **Acknowledged by the author** — a human reply indicates the finding is intentional, accepted as-is, or will be addressed separately (e.g. \"that's fine\", \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\"). A reply that merely asks a question or disputes the finding without a clear resolution should NOT count.\n\n")
+	b.WriteString("Return a JSON array of thread ID strings for findings that should be resolved inside a ```json code fence.\n")
+	b.WriteString("If none should be resolved, return an empty array: `[]`.\n\n")
 	b.WriteString("Example:\n```json\n[\"thread-0\", \"thread-2\"]\n```\n")
 
 	return b.String()
