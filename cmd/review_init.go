@@ -85,10 +85,7 @@ var reviewInitCmd = &cobra.Command{
 			authEnv = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
 		}
 
-		actionRef := Version
-		if !strings.HasPrefix(actionRef, "v") {
-			actionRef = "v" + actionRef
-		}
+		actionRef := "review-v1"
 
 		workflow := fmt.Sprintf(`name: Clanopy Review
 on:
