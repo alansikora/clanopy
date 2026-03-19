@@ -97,11 +97,18 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 		case hasReply:
 			class = TriageHasReply
 		default:
-			class = TriageSkip
+			// Even if GitHub didn't mark the thread as outdated, check if the
+			// diff touches the same file. A fix may change nearby lines without
+			// affecting the exact commented range.
+			if fileInDiff(fullDiff, t.Path) {
+				class = TriageCodeChanged
+			} else {
+				class = TriageSkip
+			}
 		}
 
 		var fileDiff string
-		if outdated {
+		if class == TriageCodeChanged || class == TriageCodeChangedReply {
 			fileDiff = ExtractFileDiff(fullDiff, t.Path)
 		}
 
@@ -114,6 +121,11 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 	}
 
 	return result
+}
+
+// fileInDiff checks if the diff contains changes to the given file path.
+func fileInDiff(diff, path string) bool {
+	return strings.Contains(diff, "+++ b/"+path)
 }
 
 // hasHumanReply checks if a thread has at least one reply from a non-bot author.
