@@ -308,14 +308,14 @@ func candidateScore(path string) int {
 	return 0
 }
 
-// escapePromptTag neutralises both opening and closing tag patterns for
-// tagName in content, preventing adversarial repos from injecting fake
-// prompt sections. Escapes <tagName (opening) and </tagName> (closing).
+// escapePromptTag neutralises any XML-like tag matching tagName in content,
+// preventing adversarial repos from injecting fake prompt sections.
+// Replaces every "<" immediately followed by tagName or /tagName with "&lt;"
+// which covers all variants: opening, closing, self-closing, with or without
+// attributes or whitespace.
 func escapePromptTag(content, tagName string) string {
-	content = strings.ReplaceAll(content, "</"+tagName+">", "&lt;/"+tagName+"&gt;")
-	content = strings.ReplaceAll(content, "<"+tagName+" ", "&lt;"+tagName+" ")
-	content = strings.ReplaceAll(content, "<"+tagName+">", "&lt;"+tagName+"&gt;")
-	content = strings.ReplaceAll(content, "<"+tagName+"/>", "&lt;"+tagName+"/&gt;")
+	content = strings.ReplaceAll(content, "</"+tagName, "&lt;/"+tagName)
+	content = strings.ReplaceAll(content, "<"+tagName, "&lt;"+tagName)
 	return content
 }
 
