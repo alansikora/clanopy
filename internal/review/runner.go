@@ -167,6 +167,10 @@ func Run(opts RunOptions) error {
 
 	var prompt string
 	var fixedIndices []int
+	// reviewDiff is the diff used to resolve inline comment positions.
+	// Defaults to the full PR diff; overridden with the incremental diff
+	// when on the incremental path so that line positions match findings.
+	reviewDiff := pr.Diff
 	if len(clanopyThreads) > 0 && previousSHA != "" {
 		// Incremental review.
 		fmt.Fprintf(os.Stderr, "Re-reviewing PR #%d (%d unresolved threads, base %s)\n", opts.PRNumber, len(clanopyThreads), previousSHA[:8])
@@ -247,6 +251,7 @@ func Run(opts RunOptions) error {
 			}
 			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issues excluded)...\n", len(unresolved))
 			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles)
+			reviewDiff = incrementalDiff
 		}
 	} else {
 		// First review — full PR diff.
@@ -356,7 +361,7 @@ func Run(opts RunOptions) error {
 				return fmt.Errorf("posting review: %w", err)
 			}
 		} else {
-			if err := PostReview(repo, opts.PRNumber, result, pr.Diff); err != nil {
+			if err := PostReview(repo, opts.PRNumber, result, reviewDiff); err != nil {
 				return fmt.Errorf("posting review: %w", err)
 			}
 		}

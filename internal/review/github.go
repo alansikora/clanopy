@@ -489,7 +489,7 @@ func FilesFromDiff(diff string) []string {
 	seen := make(map[string]bool)
 	for _, line := range strings.Split(diff, "\n") {
 		if strings.HasPrefix(line, "+++ b/") {
-			path := line[6:]
+			path := strings.TrimRight(line[6:], "\r")
 			if !seen[path] {
 				seen[path] = true
 				files = append(files, path)
