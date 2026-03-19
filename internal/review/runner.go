@@ -294,8 +294,10 @@ func Run(opts RunOptions) error {
 							verb = "fixed"
 							reasonSuffix = " (code change)"
 						case "acknowledged":
+							verb = "acknowledged"
 							reasonSuffix = " (author acknowledged)"
 						case "rebutted":
+							verb = "rebutted"
 							reasonSuffix = " (author rebutted)"
 						}
 						if err := ResolveThread(t.ID); err != nil {
