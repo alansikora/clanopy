@@ -8,6 +8,7 @@ import (
 
 	"github.com/alansikora/clanopy/internal/commands"
 	"github.com/alansikora/clanopy/internal/config"
+	"github.com/alansikora/clanopy/internal/update"
 	"github.com/spf13/cobra"
 )
 
@@ -49,7 +50,16 @@ var resolveCmd = &cobra.Command{
 
 		commands.Ensure()
 
-		fmt.Fprint(os.Stderr, "\033[90m↳ clanopy "+DisplayVersion()+"\033[0m\n")
+		versionLine := "\033[90m↳ clanopy " + DisplayVersion()
+		if latest := update.CheckUpdateNoticeCached(DisplayVersion()); latest != "" {
+			versionLine += " \033[33m(" + latest + " available — run clanopy upgrade)\033[90m"
+		}
+		versionLine += "\033[0m\n"
+		fmt.Fprint(os.Stderr, versionLine)
+
+		// Refresh the cache in the background (non-blocking) so the next
+		// invocation has fresh data without stalling this one.
+		go update.CheckLatest()
 		if result.ProjectPath != "" {
 			projectName := filepath.Base(result.ProjectPath)
 			fmt.Fprintf(os.Stderr, "\033[90m↳ workspace: %s · project: %s\033[0m\n", result.WorkspaceName, projectName)
