@@ -112,6 +112,7 @@ jobs:
 			return fmt.Errorf("creating workflow directory: %w", err)
 		}
 
+		workflowCreated := false
 		if _, err := os.Stat(workflowPath); err == nil {
 			fmt.Fprintf(os.Stderr, "  %s already exists, skipping\n", workflowPath)
 		} else {
@@ -119,6 +120,7 @@ jobs:
 				return fmt.Errorf("writing workflow file: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "  Created %s\n", workflowPath)
+			workflowCreated = true
 		}
 
 		// 4. Generate review config using Claude (fall back to static template).
@@ -129,6 +131,7 @@ jobs:
 			return fmt.Errorf("creating config directory: %w", err)
 		}
 
+		configCreated := false
 		if _, err := os.Stat(configPath); err == nil {
 			fmt.Fprintf(os.Stderr, "  %s already exists, skipping\n", configPath)
 		} else {
@@ -144,6 +147,7 @@ jobs:
 				return fmt.Errorf("writing review config: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "  Created %s\n", configPath)
+			configCreated = true
 		}
 
 		// 5. Update .gitignore with clanopy entries.
@@ -153,6 +157,26 @@ jobs:
 		}
 
 		// 6. Create a PR with the review setup.
+		if !workflowCreated && !configCreated && !gitignoreUpdated {
+			fmt.Fprintf(os.Stderr, "\nReview setup is already complete — nothing to do.\n")
+			return nil
+		}
+
+		var filesToAdd []string
+		var bullets []string
+		if workflowCreated {
+			filesToAdd = append(filesToAdd, ".github/workflows/clanopy-review.yml")
+			bullets = append(bullets, "- Add Clanopy automated PR review workflow")
+		}
+		if configCreated {
+			filesToAdd = append(filesToAdd, ".clanopy/review.yml")
+			bullets = append(bullets, "- Add starter `.clanopy/review.yml` config")
+		}
+		if gitignoreUpdated {
+			filesToAdd = append(filesToAdd, ".gitignore")
+			bullets = append(bullets, "- Update `.gitignore` with clanopy entries")
+		}
+
 		branch := "clanopy/review-setup"
 		fmt.Fprintf(os.Stderr, "\nCreating PR...\n")
 
@@ -161,13 +185,6 @@ jobs:
 			return fmt.Errorf("creating branch: %s\n%s", err, string(out))
 		}
 
-		filesToAdd := []string{
-			".github/workflows/clanopy-review.yml",
-			".clanopy/review.yml",
-		}
-		if gitignoreUpdated {
-			filesToAdd = append(filesToAdd, ".gitignore")
-		}
 		if out, err := exec.Command("git", append([]string{"add"}, filesToAdd...)...).CombinedOutput(); err != nil {
 			return fmt.Errorf("staging files: %s\n%s", err, string(out))
 		}
@@ -180,7 +197,7 @@ jobs:
 			return fmt.Errorf("pushing: %s\n%s", err, string(out))
 		}
 
-		prBody := "## Summary\n- Add Clanopy automated PR review workflow\n- Add starter `.clanopy/review.yml` config\n- Update `.gitignore` with clanopy entries\n\nPRs will be automatically reviewed by Claude on open and update."
+		prBody := "## Summary\n" + strings.Join(bullets, "\n") + "\n\nPRs will be automatically reviewed by Claude on open and update."
 		prOut, err := exec.Command("gh", "pr", "create",
 			"--title", "Add Clanopy PR review",
 			"--body", prBody,
