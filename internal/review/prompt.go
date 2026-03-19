@@ -108,7 +108,8 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 		}
 		fmt.Fprintf(&b, "  %s\n", firstLine)
 		for _, r := range t.Replies {
-			fmt.Fprintf(&b, "  > **@%s** replied: %s\n", r.Author, r.Body)
+			normalizedBody := strings.ReplaceAll(r.Body, "\n", " ")
+			fmt.Fprintf(&b, "  > **@%s** replied: %s\n", r.Author, normalizedBody)
 		}
 	}
 

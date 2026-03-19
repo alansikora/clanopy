@@ -380,7 +380,11 @@ func Run(opts RunOptions) error {
 			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixedIndices)
 			minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
 
-			unresolvedCount := len(clanopyThreads) - len(fixedIndices)
+			fixedSet := make(map[int]bool, len(fixedIndices))
+			for _, idx := range fixedIndices {
+				fixedSet[idx] = true
+			}
+			unresolvedCount := len(clanopyThreads) - len(fixedSet)
 			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", unresolvedCount)
 			return nil
 		}
