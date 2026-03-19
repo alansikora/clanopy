@@ -146,7 +146,12 @@ jobs:
 			fmt.Fprintf(os.Stderr, "  Created %s\n", configPath)
 		}
 
-		// 5. Create a PR with the review setup.
+		// 5. Update .gitignore with clanopy/claude entries.
+		if err := updateGitignore(); err != nil {
+			return fmt.Errorf("updating .gitignore: %w", err)
+		}
+
+		// 6. Create a PR with the review setup.
 		branch := "clanopy/review-setup"
 		fmt.Fprintf(os.Stderr, "\nCreating PR...\n")
 
@@ -158,6 +163,7 @@ jobs:
 		if out, err := exec.Command("git", "add",
 			".github/workflows/clanopy-review.yml",
 			".clanopy/review.yml",
+			".gitignore",
 		).CombinedOutput(); err != nil {
 			return fmt.Errorf("staging files: %s\n%s", err, string(out))
 		}
@@ -170,7 +176,7 @@ jobs:
 			return fmt.Errorf("pushing: %s\n%s", err, string(out))
 		}
 
-		prBody := "## Summary\n- Add Clanopy automated PR review workflow\n- Add starter `.clanopy/review.yml` config\n\nPRs will be automatically reviewed by Claude on open and update."
+		prBody := "## Summary\n- Add Clanopy automated PR review workflow\n- Add starter `.clanopy/review.yml` config\n- Update `.gitignore` with clanopy entries\n\nPRs will be automatically reviewed by Claude on open and update."
 		prOut, err := exec.Command("gh", "pr", "create",
 			"--title", "Add Clanopy PR review",
 			"--body", prBody,
@@ -184,6 +190,44 @@ jobs:
 		fmt.Fprintf(os.Stderr, "\nDone! Merge the PR to enable automated reviews.\n")
 		return nil
 	},
+}
+
+func updateGitignore() error {
+	entries := []string{
+		".clanopy/reviews/",
+		".clanopy/**/*.bak",
+	}
+
+	gitignorePath := ".gitignore"
+	existing := ""
+	if data, err := os.ReadFile(gitignorePath); err == nil {
+		existing = string(data)
+	}
+
+	var toAdd []string
+	for _, entry := range entries {
+		if !strings.Contains(existing, entry) {
+			toAdd = append(toAdd, entry)
+		}
+	}
+
+	if len(toAdd) == 0 {
+		fmt.Fprintf(os.Stderr, "  .gitignore already up to date\n")
+		return nil
+	}
+
+	// Ensure existing content ends with a newline before appending.
+	if existing != "" && !strings.HasSuffix(existing, "\n") {
+		existing += "\n"
+	}
+
+	section := "\n# clanopy\n" + strings.Join(toAdd, "\n") + "\n"
+	if err := os.WriteFile(gitignorePath, []byte(existing+section), 0644); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "  Updated .gitignore\n")
+	return nil
 }
 
 func init() {
