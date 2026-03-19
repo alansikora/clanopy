@@ -324,6 +324,12 @@ func DetectRepo() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ThreadReply represents a reply to a review thread (i.e. any comment after the first).
+type ThreadReply struct {
+	Author string
+	Body   string
+}
+
 // ReviewThread represents a review thread from a PR.
 type ReviewThread struct {
 	ID       string
@@ -331,6 +337,7 @@ type ReviewThread struct {
 	Line     int
 	Body     string
 	Resolved bool
+	Replies  []ThreadReply
 }
 
 // graphQLThreadsResponse is the JSON shape returned by the review threads query.
@@ -342,11 +349,14 @@ type graphQLThreadsResponse struct {
 					Nodes []struct {
 						ID         string `json:"id"`
 						IsResolved bool   `json:"isResolved"`
-						Comments   struct {
+						Comments struct {
 							Nodes []struct {
-								Body string `json:"body"`
-								Path string `json:"path"`
-								Line int    `json:"line"`
+								Body   string `json:"body"`
+								Path   string `json:"path"`
+								Line   int    `json:"line"`
+								Author struct {
+									Login string `json:"login"`
+								} `json:"author"`
 							} `json:"nodes"`
 						} `json:"comments"`
 					} `json:"nodes"`
@@ -371,8 +381,8 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
         nodes {
           id
           isResolved
-          comments(first: 1) {
-            nodes { body path line }
+          comments(first: 100) {
+            nodes { body path line author { login } }
           }
         }
       }
@@ -403,12 +413,21 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 			continue
 		}
 
+		var replies []ThreadReply
+		for _, c := range node.Comments.Nodes[1:] {
+			replies = append(replies, ThreadReply{
+				Author: c.Author.Login,
+				Body:   c.Body,
+			})
+		}
+
 		threads = append(threads, ReviewThread{
 			ID:       node.ID,
 			Path:     comment.Path,
 			Line:     comment.Line,
 			Body:     comment.Body,
 			Resolved: node.IsResolved,
+			Replies:  replies,
 		})
 	}
 
@@ -597,6 +616,83 @@ func FindClanopyReviewNodeIDs(repo string, prNumber int) ([]string, error) {
 	}
 
 	return nodeIDs, nil
+}
+
+// FindingIDFromThread extracts the finding ID from a thread body.
+// Thread bodies follow the format: 🟠 **bug** — `finding-id`
+func FindingIDFromThread(body string) string {
+	firstLine := body
+	if idx := strings.Index(body, "\n"); idx >= 0 {
+		firstLine = body[:idx]
+	}
+	// The separator is " — `" (space, em-dash U+2014, space, backtick).
+	marker := " \u2014 `"
+	start := strings.Index(firstLine, marker)
+	if start < 0 {
+		return ""
+	}
+	start += len(marker)
+	end := strings.Index(firstLine[start:], "`")
+	if end < 0 {
+		return ""
+	}
+	return firstLine[start : start+end]
+}
+
+// ClanopyReview represents a clanopy review with its node ID and finding IDs.
+type ClanopyReview struct {
+	NodeID     string
+	FindingIDs []string
+}
+
+// FindClanopyReviews returns clanopy reviews with their parsed finding IDs.
+func FindClanopyReviews(repo string, prNumber int) ([]ClanopyReview, error) {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid repo format %q, expected owner/name", repo)
+	}
+
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
+	out, err := exec.Command("gh", "api", apiPath).Output()
+	if err != nil {
+		return nil, fmt.Errorf("fetching PR reviews: %w", err)
+	}
+
+	var reviews []ghReview
+	if err := json.Unmarshal(out, &reviews); err != nil {
+		return nil, fmt.Errorf("parsing PR reviews: %w", err)
+	}
+
+	const prefix = "<!-- clanopy:review "
+	const suffix = " -->"
+
+	var result []ClanopyReview
+	for _, rev := range reviews {
+		idx := strings.Index(rev.Body, prefix)
+		if idx < 0 {
+			continue
+		}
+		start := idx + len(prefix)
+		endIdx := strings.Index(rev.Body[start:], suffix)
+		if endIdx < 0 {
+			continue
+		}
+		jsonData := rev.Body[start : start+endIdx]
+		var rr ReviewResult
+		if err := json.Unmarshal([]byte(jsonData), &rr); err != nil {
+			continue
+		}
+		var ids []string
+		for _, f := range rr.Findings {
+			ids = append(ids, f.ID)
+		}
+		result = append(result, ClanopyReview{
+			NodeID:     rev.NodeID,
+			FindingIDs: ids,
+		})
+	}
+
+	return result, nil
 }
 
 // MinimizeComment hides a comment on GitHub using the minimizeComment GraphQL mutation.

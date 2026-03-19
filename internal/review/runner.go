@@ -92,6 +92,61 @@ func allResolved(threads []ReviewThread, fixedIndices []int) bool {
 	return true
 }
 
+// resolvedFindingIDs builds the set of finding IDs that are resolved.
+// It combines threads already resolved on GitHub with threads just fixed by re-evaluation.
+func resolvedFindingIDs(allThreads, unresolved []ReviewThread, fixedIndices []int) map[string]bool {
+	resolved := make(map[string]bool)
+	for _, t := range allThreads {
+		if t.Resolved {
+			if id := FindingIDFromThread(t.Body); id != "" {
+				resolved[id] = true
+			}
+		}
+	}
+	fixedSet := make(map[int]bool, len(fixedIndices))
+	for _, idx := range fixedIndices {
+		fixedSet[idx] = true
+	}
+	for i, t := range unresolved {
+		if fixedSet[i] {
+			if id := FindingIDFromThread(t.Body); id != "" {
+				resolved[id] = true
+			}
+		}
+	}
+	return resolved
+}
+
+// minimizeFullyResolvedReviews minimizes reviews whose findings are all resolved.
+func minimizeFullyResolvedReviews(repo string, prNumber int, resolvedIDs map[string]bool) {
+	reviews, err := FindClanopyReviews(repo, prNumber)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not fetch reviews for minimization: %v\n", err)
+		return
+	}
+	minimized := 0
+	for _, rev := range reviews {
+		allResolved := len(rev.FindingIDs) > 0
+		for _, fid := range rev.FindingIDs {
+			if !resolvedIDs[fid] {
+				allResolved = false
+				break
+			}
+		}
+		if !allResolved {
+			continue
+		}
+		if err := MinimizeComment(rev.NodeID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not minimize review: %v\n", err)
+		} else {
+			minimized++
+		}
+	}
+	if minimized > 0 {
+		fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", minimized)
+	}
+}
+
 // Run orchestrates the full review flow.
 func Run(opts RunOptions) error {
 	// 1. Detect repo if not provided.
@@ -320,8 +375,19 @@ func Run(opts RunOptions) error {
 			return nil
 		}
 		if len(clanopyThreads) > 0 {
-			// Re-review: old unresolved threads still exist, nothing new — do nothing.
-			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", len(clanopyThreads))
+			// Re-review: some threads still unresolved, no new findings.
+			// Minimize reviews whose findings are ALL resolved.
+			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixedIndices)
+			minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
+
+			fixedSet := make(map[int]bool, len(fixedIndices))
+			for _, idx := range fixedIndices {
+				if idx >= 0 && idx < len(clanopyThreads) {
+					fixedSet[idx] = true
+				}
+			}
+			unresolvedCount := len(clanopyThreads) - len(fixedSet)
+			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", unresolvedCount)
 			return nil
 		}
 	}
@@ -356,23 +422,10 @@ func Run(opts RunOptions) error {
 
 	// 11. Post review if requested (uses PR Review API for inline comments).
 	if opts.Post {
-		// Minimize previous clanopy reviews before posting a new one.
+		// Minimize previous clanopy reviews whose findings are ALL resolved.
 		if len(clanopyThreads) > 0 {
-			if nodeIDs, err := FindClanopyReviewNodeIDs(repo, opts.PRNumber); err == nil {
-				minimized := 0
-				for _, nodeID := range nodeIDs {
-					if err := MinimizeComment(nodeID); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: could not minimize review: %v\n", err)
-					} else {
-						minimized++
-					}
-				}
-				if minimized > 0 {
-					fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", minimized)
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, "Warning: could not fetch reviews for minimization: %v\n", err)
-			}
+			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixedIndices)
+			minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
 		}
 
 		if len(findings) == 0 {
