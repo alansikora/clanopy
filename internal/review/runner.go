@@ -362,49 +362,6 @@ func Run(opts RunOptions) error {
 		SHA:      strings.TrimSpace(string(headSHA)),
 	}
 
-	// Handle zero-findings scenarios.
-	if len(findings) == 0 && opts.Post {
-		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixed) {
-			// Re-review: all resolved — minimize old reviews and post all-clear.
-			minimizeFailed := false
-			if nodeIDs, err := FindClanopyReviewNodeIDs(repo, opts.PRNumber); err == nil {
-				for _, nodeID := range nodeIDs {
-					if err := MinimizeComment(nodeID); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: could not minimize review: %v\n", err)
-						minimizeFailed = true
-					}
-				}
-				if len(nodeIDs) > 0 && !minimizeFailed {
-					fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", len(nodeIDs))
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, "Warning: could not fetch reviews for minimization: %v\n", err)
-				minimizeFailed = true
-			}
-			if err := PostAllClearReview(repo, opts.PRNumber, minimizeFailed); err != nil {
-				return fmt.Errorf("posting all-clear review: %w", err)
-			}
-			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
-			return nil
-		}
-		if len(clanopyThreads) > 0 {
-			// Re-review: some threads still unresolved, no new findings.
-			// Minimize reviews whose findings are ALL resolved.
-			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixed)
-			minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
-
-			fixedSet := make(map[int]bool, len(fixed))
-			for _, f := range fixed {
-				if f.Index >= 0 && f.Index < len(clanopyThreads) {
-					fixedSet[f.Index] = true
-				}
-			}
-			unresolvedCount := len(clanopyThreads) - len(fixedSet)
-			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", unresolvedCount)
-			return nil
-		}
-	}
-
 	// 8b. Cache result for later use by `clanopy fix`.
 	if err := SaveResult(result); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to cache review result: %v\n", err)
@@ -433,25 +390,66 @@ func Run(opts RunOptions) error {
 		fmt.Print(formatted)
 	}
 
-	// 11. Post review if requested (uses PR Review API for inline comments).
+	// 11. Post review if requested.
 	if opts.Post {
-		// Minimize previous clanopy reviews whose findings are ALL resolved.
+		// Step 5: Minimize ALL previous clanopy reviews where all inline
+		// findings are resolved. This runs before posting so the new
+		// message is always the final one on the timeline.
+		minimizeFailed := false
 		if len(clanopyThreads) > 0 {
-			resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixed)
-			minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
+			if nodeIDs, err := FindClanopyReviewNodeIDs(repo, opts.PRNumber); err == nil {
+				if allResolved(clanopyThreads, fixed) {
+					// All resolved — minimize every previous clanopy review.
+					for _, nodeID := range nodeIDs {
+						if err := MinimizeComment(nodeID); err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: could not minimize review: %v\n", err)
+							minimizeFailed = true
+						}
+					}
+					if len(nodeIDs) > 0 && !minimizeFailed {
+						fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", len(nodeIDs))
+					}
+				} else {
+					// Partially resolved — minimize only reviews whose findings are ALL resolved.
+					resolvedIDs := resolvedFindingIDs(threads, clanopyThreads, fixed)
+					minimizeFullyResolvedReviews(repo, opts.PRNumber, resolvedIDs)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: could not fetch reviews for minimization: %v\n", err)
+				minimizeFailed = true
+			}
 		}
 
-		if len(findings) == 0 {
-			// First review, no issues — post a clean congratulations message.
-			if err := PostCleanReview(repo, opts.PRNumber); err != nil {
-				return fmt.Errorf("posting review: %w", err)
-			}
-		} else {
+		// Step 6: Post one of the following.
+		if len(findings) > 0 {
+			// New findings — post review with inline comments.
 			if err := PostReview(repo, opts.PRNumber, result, pr.Diff, result.SHA); err != nil {
 				return fmt.Errorf("posting review: %w", err)
 			}
+			fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
+		} else if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixed) {
+			// Re-review: all resolved — post all-clear.
+			if err := PostAllClearReview(repo, opts.PRNumber, minimizeFailed); err != nil {
+				return fmt.Errorf("posting all-clear review: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
+		} else if len(clanopyThreads) > 0 {
+			// Re-review: some still unresolved, no new findings — nothing to post.
+			fixedSet := make(map[int]bool, len(fixed))
+			for _, f := range fixed {
+				if f.Index >= 0 && f.Index < len(clanopyThreads) {
+					fixedSet[f.Index] = true
+				}
+			}
+			unresolvedCount := len(clanopyThreads) - len(fixedSet)
+			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", unresolvedCount)
+		} else {
+			// First review, no issues.
+			if err := PostCleanReview(repo, opts.PRNumber); err != nil {
+				return fmt.Errorf("posting review: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
 		}
-		fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
 	}
 
 	return nil
