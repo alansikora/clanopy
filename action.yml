@@ -15,10 +15,6 @@ inputs:
     description: 'Path to .clanopy/review.yml'
     required: false
     default: '.clanopy/review.yml'
-  github_token:
-    description: 'Fallback GitHub token for repos without the Clanopy Review app installed.'
-    required: false
-    default: '${{ github.token }}'
   post_comment:
     description: 'Post findings as PR comment'
     required: false
@@ -50,14 +46,14 @@ runs:
       run: |
         # Request OIDC token from GitHub Actions (requires id-token: write permission).
         if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
-          echo "::notice::OIDC not available — using fallback github_token. Add 'id-token: write' permission and install the Clanopy Review app for bot identity."
-          exit 0
+          echo "::error::OIDC not available. Add 'id-token: write' permission to your workflow and install the Clanopy Review app."
+          exit 1
         fi
         OIDC_TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
           "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=clanopy" | jq -r '.value')
         if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
-          echo "::warning::Failed to obtain OIDC token — using fallback github_token."
-          exit 0
+          echo "::error::Failed to obtain OIDC token."
+          exit 1
         fi
         # Exchange OIDC token for a GitHub App installation token.
         RESPONSE=$(curl -sS -X POST https://token.clanopy.workers.dev/token \
@@ -68,7 +64,8 @@ runs:
           echo "token=$TOKEN" >> $GITHUB_OUTPUT
         else
           ERROR=$(echo "$RESPONSE" | jq -r '.error // "unknown error"')
-          echo "::notice::Clanopy Review app token not available ($ERROR) — using fallback github_token."
+          echo "::error::Failed to get Clanopy Review app token: $ERROR. Install the app at https://github.com/apps/clanopy-review"
+          exit 1
         fi
 
     - name: Run review
@@ -76,7 +73,7 @@ runs:
       env:
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
-        GH_TOKEN: ${{ steps.review-token.outputs.token || inputs.github_token }}
+        GH_TOKEN: ${{ steps.review-token.outputs.token }}
       run: |
         PR_NUMBER="${{ github.event.pull_request.number }}"
         REPO="${{ github.repository }}"
