@@ -19,6 +19,10 @@ inputs:
     description: 'Post findings as PR comment'
     required: false
     default: 'true'
+  clanopy_version:
+    description: 'Clanopy CLI version to install (e.g. "v0.3.0", "canary"). Defaults to latest release.'
+    required: false
+    default: 'latest'
 
 runs:
   using: 'composite'
@@ -26,11 +30,11 @@ runs:
     - name: Install clanopy
       shell: bash
       env:
-        ACTION_REF: ${{ github.action_ref }}
+        CLANOPY_VERSION: ${{ inputs.clanopy_version }}
       run: |
         ARGS=()
-        if [[ "$ACTION_REF" == v* ]] || [[ "$ACTION_REF" == "canary" ]]; then
-          ARGS+=(--version "$ACTION_REF")
+        if [ "$CLANOPY_VERSION" != "latest" ]; then
+          ARGS+=(--version "$CLANOPY_VERSION")
         fi
         curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh -s -- "${ARGS[@]}"
         echo "$HOME/.local/bin" >> $GITHUB_PATH
