@@ -29,8 +29,14 @@ runs:
   steps:
     - name: Install clanopy
       shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
       run: |
-        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh
+        VERSION_FLAG=""
+        if [[ "$ACTION_REF" == v* ]]; then
+          VERSION_FLAG="--version $ACTION_REF"
+        fi
+        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh -s -- $VERSION_FLAG
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Claude Code
