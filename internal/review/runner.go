@@ -287,9 +287,11 @@ func Run(opts RunOptions) error {
 							}
 							label = firstLine
 						}
+						verb := "resolved"
 						reasonSuffix := ""
 						switch f.Reason {
 						case "code_change":
+							verb = "fixed"
 							reasonSuffix = " (code change)"
 						case "acknowledged":
 							reasonSuffix = " (author acknowledged)"
@@ -298,12 +300,12 @@ func Run(opts RunOptions) error {
 						}
 						if err := ResolveThread(t.ID); err != nil {
 							if strings.Contains(err.Error(), "Resource not accessible") {
-								fmt.Fprintf(os.Stderr, "  ~ %s — fixed%s (auto-resolve unavailable: token lacks permission)\n", label, reasonSuffix)
+								fmt.Fprintf(os.Stderr, "  ~ %s — %s%s (auto-resolve unavailable: token lacks permission)\n", label, verb, reasonSuffix)
 							} else {
-								fmt.Fprintf(os.Stderr, "  ! %s — fixed%s, but failed to resolve thread: %v\n", label, reasonSuffix, err)
+								fmt.Fprintf(os.Stderr, "  ! %s — %s%s, but failed to resolve thread: %v\n", label, verb, reasonSuffix, err)
 							}
 						} else {
-							fmt.Fprintf(os.Stderr, "  ✓ %s — resolved%s\n", label, reasonSuffix)
+							fmt.Fprintf(os.Stderr, "  ✓ %s — %s%s\n", label, verb, reasonSuffix)
 						}
 					}
 				}
