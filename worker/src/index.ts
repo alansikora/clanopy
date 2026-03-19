@@ -54,7 +54,8 @@ export default {
         );
       }
 
-      // 6. Generate a scoped installation token.
+      // 6. Generate an installation token scoped to the requesting repo.
+      // Permissions are inherited from the App's installation config.
       const [owner, repo] = repository.split("/");
       const tokenResponse = await fetch(
         `${GITHUB_API}/app/installations/${installationId}/access_tokens`,
@@ -67,7 +68,6 @@ export default {
           },
           body: JSON.stringify({
             repositories: [repo],
-            permissions: { pull_requests: "write", contents: "read" },
           }),
         }
       );
