@@ -32,11 +32,11 @@ runs:
       env:
         ACTION_REF: ${{ github.action_ref }}
       run: |
-        VERSION_FLAG=""
-        if [[ "$ACTION_REF" == v* ]]; then
-          VERSION_FLAG="--version $ACTION_REF"
+        ARGS=()
+        if [[ -n "$ACTION_REF" ]]; then
+          ARGS+=(--version "$ACTION_REF")
         fi
-        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh -s -- $VERSION_FLAG
+        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh -s -- "${ARGS[@]}"
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Claude Code
