@@ -318,15 +318,22 @@ func Run(opts RunOptions) error {
 
 		// Phase 2: Build review prompt.
 		fixedSet := make(map[int]bool, len(fixed))
+		fixedReasons := make(map[int]string, len(fixed))
 		for _, f := range fixed {
 			if f.Index >= 0 && f.Index < len(clanopyThreads) {
 				fixedSet[f.Index] = true
+				fixedReasons[f.Index] = f.Reason
 			}
 		}
 		var unresolved, resolved []ReviewThread
 		for i, t := range clanopyThreads {
 			if fixedSet[i] {
-				resolved = append(resolved, t)
+				// Only pass code-fixed threads as "resolved" for the incremental
+				// prompt. Acknowledged/rebutted threads had no code change, so new
+				// findings near them are legitimate and should not be suppressed.
+				if fixedReasons[i] == "code_change" {
+					resolved = append(resolved, t)
+				}
 			} else {
 				unresolved = append(unresolved, t)
 			}
