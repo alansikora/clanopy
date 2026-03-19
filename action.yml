@@ -30,7 +30,7 @@ runs:
     - name: Install clanopy
       shell: bash
       run: |
-        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh
+        curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh -s -- --version v0.1.1
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Claude Code
