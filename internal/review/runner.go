@@ -110,11 +110,14 @@ func Run(opts RunOptions) error {
 	}
 
 	// 2b. Skip setup PRs (workflow file being added for the first time).
-	if isSetupPR(pr.Diff) {
+	// Only skip if the PR exclusively contains setup files (workflow + config).
+	if isSetupPR(pr.Diff, pr.Files) {
 		fmt.Fprintf(os.Stderr, "Setup PR detected — skipping review\n")
 		if opts.Post {
-			PostComment(repo, opts.PRNumber,
-				"## \U0001F33F Clanopy Review\n\nSetup PR detected — skipping automated review. Future PRs will be reviewed automatically.")
+			if err := PostComment(repo, opts.PRNumber,
+				"## \U0001F33F Clanopy Review\n\nSetup PR detected — skipping automated review. Future PRs will be reviewed automatically."); err != nil {
+				return fmt.Errorf("posting setup PR comment: %w", err)
+			}
 		}
 		return nil
 	}

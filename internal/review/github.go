@@ -572,9 +572,19 @@ func FetchFileContents(files []string, ignorePatterns []string, maxPerFile, maxT
 	return contents, skipped
 }
 
-// isSetupPR detects whether the diff contains a newly added GitHub Actions
-// workflow file that references clanopy (i.e., the initial setup PR).
-func isSetupPR(diff string) bool {
+// isSetupPR detects whether this is the initial clanopy setup PR.
+// Returns true only when a new workflow file referencing clanopy is added AND
+// the PR contains no other files beyond expected setup artifacts (workflow +
+// config), so that PRs bundling real code changes are never silently skipped.
+func isSetupPR(diff string, files []string) bool {
+	// All files must be known setup paths.
+	for _, f := range files {
+		if !isSetupFile(f) {
+			return false
+		}
+	}
+
+	// At least one newly added workflow file must reference clanopy.
 	lines := strings.Split(diff, "\n")
 	for i := 0; i < len(lines)-1; i++ {
 		if lines[i] != "--- /dev/null" {
@@ -584,9 +594,7 @@ func isSetupPR(diff string) bool {
 		if !strings.HasPrefix(plusLine, "+++ b/.github/workflows/") {
 			continue
 		}
-		// Check if any added line in this file hunk references clanopy.
 		for j := i + 2; j < len(lines); j++ {
-			// Stop at the next file boundary.
 			if strings.HasPrefix(lines[j], "--- ") || strings.HasPrefix(lines[j], "diff --git") {
 				break
 			}
@@ -596,6 +604,12 @@ func isSetupPR(diff string) bool {
 		}
 	}
 	return false
+}
+
+// isSetupFile returns true if the file path is a known clanopy setup artifact.
+func isSetupFile(path string) bool {
+	return strings.HasPrefix(path, ".github/workflows/") ||
+		strings.HasPrefix(path, ".clanopy/")
 }
 
 // matchesIgnore checks if a path matches any of the ignore glob patterns.
