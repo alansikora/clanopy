@@ -30,7 +30,7 @@ type TriagedThread struct {
 type ThreadResolution struct {
 	Index    int
 	Resolved bool
-	Reason   string // "code_change", "acknowledged", "rebutted"
+	Reason   string // "code_change", "acknowledged", "rebutted", "dismissed"
 	Error    error
 }
 
@@ -178,6 +178,7 @@ func buildReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
 
 	b.WriteString("## Task\n")
 	b.WriteString("Does the author's reply resolve the finding?\n")
+	b.WriteString("- **Dismissed**: Reply explicitly asks the reviewer to dismiss, ignore, or skip the finding (e.g. \"dismiss this\", \"you can safely dismiss\", \"please ignore\", \"skip this one\"). The author is exercising their authority to close the thread without further justification.\n")
 	b.WriteString("- **Acknowledged**: Reply indicates the finding is intentional, accepted, or tracked elsewhere (e.g. \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\").\n")
 	b.WriteString("- **Rebutted**: Reply provides concrete technical reasoning showing the finding is not applicable. Vague disagreement (\"I don't think so\") does NOT qualify — the reply must cite specific technical details, framework behavior, or project constraints.\n")
 	b.WriteString("- **Not resolved**: Reply is a question, vague disagreement, or does not address the finding.\n\n")
@@ -237,7 +238,7 @@ func writeReplies(b *strings.Builder, t ReviewThread) {
 // writeResolutionFormat writes the expected JSON response format.
 func writeResolutionFormat(b *strings.Builder) {
 	b.WriteString("Return a JSON object inside a ```json code fence:\n")
-	b.WriteString("- If resolved: `{\"resolved\": true, \"reason\": \"code_change\"}` or `{\"resolved\": true, \"reason\": \"acknowledged\"}` or `{\"resolved\": true, \"reason\": \"rebutted\"}`\n")
+	b.WriteString("- If resolved: `{\"resolved\": true, \"reason\": \"code_change\"}` or `{\"resolved\": true, \"reason\": \"dismissed\"}` or `{\"resolved\": true, \"reason\": \"acknowledged\"}` or `{\"resolved\": true, \"reason\": \"rebutted\"}`\n")
 	b.WriteString("- If NOT resolved: `{\"resolved\": false}`\n")
 }
 
@@ -356,6 +357,8 @@ func LogResolutions(triaged []TriagedThread, resolutions []ThreadResolution) {
 			switch r.Reason {
 			case "code_change":
 				fmt.Fprintf(os.Stderr, "  [resolved] %s — fixed by code change\n", label)
+			case "dismissed":
+				fmt.Fprintf(os.Stderr, "  [resolved] %s — dismissed by author\n", label)
 			case "acknowledged":
 				fmt.Fprintf(os.Stderr, "  [resolved] %s — acknowledged by author\n", label)
 			case "rebutted":

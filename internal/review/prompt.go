@@ -95,7 +95,7 @@ type ResolvedContext struct {
 	Path   string
 	Line   int
 	Title  string // first line of the finding body
-	Reason string // "code_change", "acknowledged", "rebutted"
+	Reason string // "code_change", "dismissed", "acknowledged", "rebutted"
 }
 
 // Deprecated: BuildReevaluatePrompt is replaced by per-thread evaluation in triage.go.
@@ -129,8 +129,9 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 	b.WriteString("Determine which of the previous findings should be resolved.\n\n")
 	b.WriteString("A finding should be resolved if ANY of the following apply:\n")
 	b.WriteString("1. **Fixed by code changes** — the new diff addresses the issue.\n")
-	b.WriteString("2. **Acknowledged by the author** — a human reply indicates the finding is intentional, accepted as-is, or will be addressed separately (e.g. \"that's fine\", \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\").\n")
-	b.WriteString("3. **Rebutted by the author** — a human reply provides a concrete technical explanation showing the finding is not applicable, the concern is mitigated, or the tradeoff is justified in this context (e.g. the behaviour cannot occur due to framework semantics, the impact is negligible because of how the system is configured, or a project convention makes the approach intentional). A vague disagreement like \"I don't think so\" does NOT qualify — the reply must cite specific technical details, framework behaviour, or project constraints.\n\n")
+	b.WriteString("2. **Dismissed by the author** — a human reply explicitly asks the reviewer to dismiss, ignore, or skip the finding (e.g. \"dismiss this\", \"you can safely dismiss\", \"please ignore\", \"skip this one\"). The author is exercising their authority to close the thread.\n")
+	b.WriteString("3. **Acknowledged by the author** — a human reply indicates the finding is intentional, accepted as-is, or will be addressed separately (e.g. \"that's fine\", \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\").\n")
+	b.WriteString("4. **Rebutted by the author** — a human reply provides a concrete technical explanation showing the finding is not applicable, the concern is mitigated, or the tradeoff is justified in this context (e.g. the behaviour cannot occur due to framework semantics, the impact is negligible because of how the system is configured, or a project convention makes the approach intentional). A vague disagreement like \"I don't think so\" does NOT qualify — the reply must cite specific technical details, framework behaviour, or project constraints.\n\n")
 	b.WriteString("A reply that merely asks a question or expresses disagreement without substantive technical reasoning should NOT count.\n\n")
 	b.WriteString("Return a JSON array of objects for findings that should be resolved inside a ```json code fence.\n")
 	b.WriteString("Each object must have `thread` (the thread ID) and `reason` (one of `code_change`, `acknowledged`, or `rebutted`).\n")
@@ -210,6 +211,8 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 			switch r.Reason {
 			case "code_change":
 				reasonLabel = "fixed by code change"
+			case "dismissed":
+				reasonLabel = "dismissed by author"
 			case "acknowledged":
 				reasonLabel = "acknowledged by author"
 			case "rebutted":
