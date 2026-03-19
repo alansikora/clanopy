@@ -29,9 +29,10 @@ runs:
   steps:
     - name: Install clanopy
       shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
       run: |
         VERSION_FLAG=""
-        ACTION_REF="${{ github.action_ref }}"
         if [[ "$ACTION_REF" == v* ]]; then
           VERSION_FLAG="--version $ACTION_REF"
         fi
