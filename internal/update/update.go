@@ -3,10 +3,13 @@ package update
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,7 +25,14 @@ const (
 	cacheFile    = "update-check.json"
 	apiTimeout   = 5 * time.Second
 	fetchTimeout = 60 * time.Second
+	maxBinarySize = 100 << 20 // 100 MB
 )
+
+// allowedDownloadHosts are the only hosts we'll fetch release assets from.
+var allowedDownloadHosts = []string{
+	"github.com",
+	"objects.githubusercontent.com",
+}
 
 // Release holds information about a GitHub release.
 type Release struct {
@@ -131,18 +141,42 @@ func parseVersion(v string) []int {
 	return nums
 }
 
-// CheckUpdateNotice returns a notice string if an update is available,
-// or empty string if current version is up to date or check fails.
-// This is designed to be non-blocking and silent on errors.
-func CheckUpdateNotice(currentVersion string) string {
-	latest, err := CheckLatest()
-	if err != nil {
+// CheckUpdateNoticeCached returns a notice string if an update is available
+// using only the local cache. Returns empty string on cache miss (never hits network).
+func CheckUpdateNoticeCached(currentVersion string) string {
+	c := readCache()
+	if c == nil {
 		return ""
 	}
-	if IsNewer(currentVersion, latest) {
-		return latest
+	if IsNewer(currentVersion, c.LatestVersion) {
+		return c.LatestVersion
 	}
 	return ""
+}
+
+// CheckUpdateNoticeAsync starts a background update check and sends the result
+// on the returned channel. The caller can select on the channel with a short
+// timeout to avoid blocking. On cache hit the result is available immediately.
+func CheckUpdateNoticeAsync(currentVersion string) <-chan string {
+	ch := make(chan string, 1)
+	// Fast path: cache hit
+	if notice := CheckUpdateNoticeCached(currentVersion); notice != "" {
+		ch <- notice
+		return ch
+	}
+	go func() {
+		latest, err := CheckLatest()
+		if err != nil {
+			ch <- ""
+			return
+		}
+		if IsNewer(currentVersion, latest) {
+			ch <- latest
+		} else {
+			ch <- ""
+		}
+	}()
+	return ch
 }
 
 // Upgrade downloads and installs the latest (or specified) version.
@@ -158,15 +192,26 @@ func Upgrade(targetVersion string) error {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
-	// Find the download URL
-	url, err := findAssetURL(targetVersion, osName, arch)
+	// Find the download URL and expected checksum
+	assetURL, err := findAssetURL(targetVersion, osName, arch)
 	if err != nil {
 		return err
 	}
 
+	checksumURL, err := findChecksumURL(targetVersion)
+	if err != nil {
+		return err
+	}
+
+	// Download the checksums file
+	expectedHash, err := fetchExpectedChecksum(checksumURL, osName, arch)
+	if err != nil {
+		return fmt.Errorf("fetching checksums: %w", err)
+	}
+
 	// Download the archive
 	client := &http.Client{Timeout: fetchTimeout}
-	resp, err := client.Get(url)
+	resp, err := client.Get(assetURL)
 	if err != nil {
 		return fmt.Errorf("downloading: %w", err)
 	}
@@ -183,8 +228,34 @@ func Upgrade(targetVersion string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Save the archive to disk so we can checksum it
+	archivePath := filepath.Join(tmpDir, "archive.tar.gz")
+	archiveFile, err := os.Create(archivePath)
+	if err != nil {
+		return err
+	}
+	hasher := sha256.New()
+	if _, err := io.Copy(archiveFile, io.TeeReader(io.LimitReader(resp.Body, maxBinarySize), hasher)); err != nil {
+		archiveFile.Close()
+		return fmt.Errorf("downloading archive: %w", err)
+	}
+	archiveFile.Close()
+
+	// Verify checksum
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if actualHash != expectedHash {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+	}
+
+	// Re-open and extract
+	archiveReader, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer archiveReader.Close()
+
 	tmpBin := filepath.Join(tmpDir, "clanopy")
-	if err := extractBinary(resp.Body, tmpBin); err != nil {
+	if err := extractBinary(archiveReader, tmpBin); err != nil {
 		return fmt.Errorf("extracting: %w", err)
 	}
 
@@ -229,36 +300,122 @@ func fetchLatest() (string, error) {
 	return release.TagName, nil
 }
 
-// findAssetURL finds the download URL for a specific release asset.
-func findAssetURL(tag, osName, arch string) (string, error) {
+type releaseAssets struct {
+	Assets []struct {
+		Name               string `json:"name"`
+		BrowserDownloadURL string `json:"browser_download_url"`
+	} `json:"assets"`
+}
+
+// fetchReleaseAssets fetches the asset list for a given release tag.
+func fetchReleaseAssets(tag string) (*releaseAssets, error) {
 	client := &http.Client{Timeout: apiTimeout}
 	resp, err := client.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", repo, tag))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("release %s not found: %s", tag, resp.Status)
+		return nil, fmt.Errorf("release %s not found: %s", tag, resp.Status)
 	}
 
-	var release struct {
-		Assets []struct {
-			Name               string `json:"name"`
-			BrowserDownloadURL string `json:"browser_download_url"`
-		} `json:"assets"`
-	}
+	var release releaseAssets
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+	return &release, nil
+}
+
+// validateAssetURL checks that a download URL points to an allowed GitHub host.
+func validateAssetURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid asset URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("asset URL must use https, got %s", u.Scheme)
+	}
+	for _, allowed := range allowedDownloadHosts {
+		if u.Host == allowed || strings.HasSuffix(u.Host, "."+allowed) {
+			return nil
+		}
+	}
+	return fmt.Errorf("asset URL host %q is not an allowed GitHub domain", u.Host)
+}
+
+// findAssetURL finds the download URL for a specific release asset.
+func findAssetURL(tag, osName, arch string) (string, error) {
+	release, err := fetchReleaseAssets(tag)
+	if err != nil {
 		return "", err
 	}
 
 	suffix := fmt.Sprintf("_%s_%s.tar.gz", osName, arch)
 	for _, a := range release.Assets {
 		if strings.HasSuffix(a.Name, suffix) {
+			if err := validateAssetURL(a.BrowserDownloadURL); err != nil {
+				return "", err
+			}
 			return a.BrowserDownloadURL, nil
 		}
 	}
 	return "", fmt.Errorf("no asset found for %s/%s in release %s", osName, arch, tag)
+}
+
+// findChecksumURL finds the checksums.txt download URL for a release.
+func findChecksumURL(tag string) (string, error) {
+	release, err := fetchReleaseAssets(tag)
+	if err != nil {
+		return "", err
+	}
+
+	for _, a := range release.Assets {
+		if a.Name == "checksums.txt" {
+			if err := validateAssetURL(a.BrowserDownloadURL); err != nil {
+				return "", err
+			}
+			return a.BrowserDownloadURL, nil
+		}
+	}
+	return "", fmt.Errorf("checksums.txt not found in release %s", tag)
+}
+
+// fetchExpectedChecksum downloads the checksums file and extracts the hash
+// for the matching archive.
+func fetchExpectedChecksum(checksumURL, osName, arch string) (string, error) {
+	client := &http.Client{Timeout: apiTimeout}
+	resp, err := client.Get(checksumURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("downloading checksums: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB max
+	if err != nil {
+		return "", err
+	}
+
+	suffix := fmt.Sprintf("_%s_%s.tar.gz", osName, arch)
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format: "<hash>  <filename>"
+		parts := strings.Fields(line)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.HasSuffix(parts[1], suffix) {
+			return parts[0], nil
+		}
+	}
+	return "", fmt.Errorf("no checksum found for %s/%s", osName, arch)
 }
 
 // extractBinary extracts the clanopy binary from a tar.gz stream.
@@ -284,7 +441,7 @@ func extractBinary(r io.Reader, dest string) error {
 				return err
 			}
 			defer f.Close()
-			_, err = io.Copy(f, tr)
+			_, err = io.Copy(f, io.LimitReader(tr, maxBinarySize))
 			return err
 		}
 	}
@@ -293,8 +450,7 @@ func extractBinary(r io.Reader, dest string) error {
 
 // replaceBinary atomically replaces the target binary with the new one.
 func replaceBinary(src, dst string) error {
-	// On macOS/Linux we can rename over the existing binary
-	// First, copy to a temp file next to the destination (same filesystem)
+	// Copy to a temp file next to the destination (same filesystem for atomic rename)
 	dir := filepath.Dir(dst)
 	tmp, err := os.CreateTemp(dir, ".clanopy-new-*")
 	if err != nil {
