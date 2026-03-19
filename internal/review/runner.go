@@ -236,8 +236,17 @@ func Run(opts RunOptions) error {
 			fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issues excluded)...\n", len(unresolved))
 			prompt = BuildPrompt(pr, cfg, startIndex)
 		} else {
+			// Scope file contents to only files in the incremental diff to
+			// prevent hallucinations about unrelated files from the full PR.
+			incFiles := FilesFromDiff(incrementalDiff)
+			incContents := make(map[string]string, len(incFiles))
+			for _, f := range incFiles {
+				if content, ok := pr.FileContents[f]; ok {
+					incContents[f] = content
+				}
+			}
 			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issues excluded)...\n", len(unresolved))
-			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, pr.FileContents, pr.Files)
+			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles)
 		}
 	} else {
 		// First review — full PR diff.

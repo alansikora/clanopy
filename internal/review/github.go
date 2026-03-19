@@ -483,6 +483,22 @@ func FetchPreviousReviewSHA(repo string, prNumber int) string {
 	return ""
 }
 
+// FilesFromDiff extracts the list of file paths touched in a unified diff.
+func FilesFromDiff(diff string) []string {
+	var files []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++ b/") {
+			path := line[6:]
+			if !seen[path] {
+				seen[path] = true
+				files = append(files, path)
+			}
+		}
+	}
+	return files
+}
+
 // GetIncrementalDiff gets the diff since a given SHA.
 func GetIncrementalDiff(baseSHA string) (string, error) {
 	// Ensure the base SHA is available locally (shallow clones may not have it).
