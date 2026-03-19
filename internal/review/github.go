@@ -629,6 +629,46 @@ func FetchFileContents(files []string, ignorePatterns []string, maxPerFile, maxT
 	return contents, skipped
 }
 
+// isSetupPR detects whether this is the initial clanopy setup PR.
+// Returns true only when a new workflow file referencing clanopy is added AND
+// the PR contains no other files beyond expected setup artifacts (workflow +
+// config), so that PRs bundling real code changes are never silently skipped.
+func isSetupPR(diff string, files []string) bool {
+	// All files must be known setup paths.
+	for _, f := range files {
+		if !isSetupFile(f) {
+			return false
+		}
+	}
+
+	// At least one newly added workflow file must reference clanopy.
+	lines := strings.Split(diff, "\n")
+	for i := 0; i < len(lines)-1; i++ {
+		if lines[i] != "--- /dev/null" {
+			continue
+		}
+		plusLine := lines[i+1]
+		if !strings.HasPrefix(plusLine, "+++ b/.github/workflows/") {
+			continue
+		}
+		for j := i + 2; j < len(lines); j++ {
+			if strings.HasPrefix(lines[j], "--- ") || strings.HasPrefix(lines[j], "diff --git") {
+				break
+			}
+			if strings.HasPrefix(lines[j], "+") && strings.Contains(lines[j], "clanopy") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isSetupFile returns true if the file path is a known clanopy setup artifact.
+func isSetupFile(path string) bool {
+	return strings.HasPrefix(path, ".github/workflows/") ||
+		strings.HasPrefix(path, ".clanopy/")
+}
+
 // matchesIgnore checks if a path matches any of the ignore glob patterns.
 func matchesIgnore(path string, patterns []string) bool {
 	for _, pat := range patterns {
