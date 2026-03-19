@@ -180,11 +180,14 @@ jobs:
 		branch := "clanopy/review-setup"
 		fmt.Fprintf(os.Stderr, "\nCreating PR...\n")
 
-		// Create branch, add files, commit, push, create PR.
-		if out, err := exec.Command("git", "checkout", "-b", branch).CombinedOutput(); err != nil {
+		// Create branch (or reset if it exists from a prior partial run), add files, commit, push, create PR.
+		if out, err := exec.Command("git", "checkout", "-B", branch).CombinedOutput(); err != nil {
 			return fmt.Errorf("creating branch: %s\n%s", err, string(out))
 		}
 
+		if len(filesToAdd) == 0 {
+			return fmt.Errorf("internal error: no files to stage")
+		}
 		if out, err := exec.Command("git", append([]string{"add"}, filesToAdd...)...).CombinedOutput(); err != nil {
 			return fmt.Errorf("staging files: %s\n%s", err, string(out))
 		}
