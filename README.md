@@ -199,7 +199,8 @@ If you prefer to run your own, the worker source is in the [`worker/`](worker/) 
    cd worker
    npm install
    wrangler deploy
-   cat /path/to/private-key.pem | wrangler secret put APP_PRIVATE_KEY
+   # Convert the key to PKCS#8 format (required by the worker)
+   openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in /path/to/private-key.pem | wrangler secret put APP_PRIVATE_KEY
    wrangler secret put APP_ID
    ```
 4. Update the proxy URL in your workflow's action reference or fork the action
