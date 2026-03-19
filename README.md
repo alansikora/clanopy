@@ -1,4 +1,4 @@
-# clanopy
+# <img width="150" alt="clanopy" src="https://github.com/user-attachments/assets/bcfbce0d-fe30-494f-8382-8fed2c523d5c" /> clanopy
 
 The canopy over your Claude Code. Workspaces, reviews, and workflows.
 
