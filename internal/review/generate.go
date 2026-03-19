@@ -339,13 +339,13 @@ func buildGeneratePrompt(info *RepoInfo) string {
 	}
 
 	// Project documentation (CLAUDE.md files) — highest-signal context.
+	// No angle-bracket escaping: these are markdown docs where <> is rare
+	// and escaping would mangle any inline code or HTML.
 	if len(info.ProjectDocs) > 0 {
 		b.WriteString("## Project Documentation\n")
 		b.WriteString("These are developer-maintained project docs (CLAUDE.md) describing conventions, architecture, and coding standards. Use these as the primary basis for generating rules.\n\n")
 		for _, path := range slices.Sorted(maps.Keys(info.ProjectDocs)) {
-			escaped := strings.ReplaceAll(info.ProjectDocs[path], "<", "&lt;")
-			escaped = strings.ReplaceAll(escaped, ">", "&gt;")
-			fmt.Fprintf(&b, "<project-doc path=%q>\n%s\n</project-doc>\n\n", path, escaped)
+			fmt.Fprintf(&b, "<project-doc path=%q>\n%s\n</project-doc>\n\n", path, info.ProjectDocs[path])
 		}
 	}
 
@@ -361,13 +361,14 @@ func buildGeneratePrompt(info *RepoInfo) string {
 	}
 
 	// Code samples for grounding.
+	// No angle-bracket escaping: source code routinely contains < and >
+	// (comparisons, generics, JSX, etc.) and escaping would produce
+	// syntactically wrong snippets that defeat the grounding purpose.
 	if len(info.CodeSamples) > 0 {
 		b.WriteString("## Code Samples\n")
 		b.WriteString("Representative source files from the project. Use these to understand actual coding patterns, naming conventions, and project structure.\n\n")
 		for _, path := range slices.Sorted(maps.Keys(info.CodeSamples)) {
-			escaped := strings.ReplaceAll(info.CodeSamples[path], "<", "&lt;")
-			escaped = strings.ReplaceAll(escaped, ">", "&gt;")
-			fmt.Fprintf(&b, "<code-sample path=%q>\n%s\n</code-sample>\n\n", path, escaped)
+			fmt.Fprintf(&b, "<code-sample path=%q>\n%s\n</code-sample>\n\n", path, info.CodeSamples[path])
 		}
 	}
 
