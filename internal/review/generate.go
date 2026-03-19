@@ -315,6 +315,7 @@ func escapePromptTag(content, tagName string) string {
 	content = strings.ReplaceAll(content, "</"+tagName+">", "&lt;/"+tagName+"&gt;")
 	content = strings.ReplaceAll(content, "<"+tagName+" ", "&lt;"+tagName+" ")
 	content = strings.ReplaceAll(content, "<"+tagName+">", "&lt;"+tagName+"&gt;")
+	content = strings.ReplaceAll(content, "<"+tagName+"/>", "&lt;"+tagName+"/&gt;")
 	return content
 }
 
