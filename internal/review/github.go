@@ -500,8 +500,13 @@ func PostCleanReview(repo string, prNumber int) error {
 }
 
 // PostAllClearReview posts a review when all previous findings have been resolved.
-func PostAllClearReview(repo string, prNumber int) error {
-	return postSimpleReview(repo, prNumber, "## \U0001F33F Clanopy Review\n\nAll previous findings have been addressed. No new issues found. \u2728")
+// If minimizeFailed is true, a note is appended warning about visible old reviews.
+func PostAllClearReview(repo string, prNumber int, minimizeFailed bool) error {
+	body := "## \U0001F33F Clanopy Review\n\nAll previous findings have been addressed. No new issues found. \u2728"
+	if minimizeFailed {
+		body += "\n\n> \u26A0\uFE0F Some previous review comments could not be minimized and may still be visible."
+	}
+	return postSimpleReview(repo, prNumber, body)
 }
 
 func postSimpleReview(repo string, prNumber int, body string) error {

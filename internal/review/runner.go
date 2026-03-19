@@ -270,26 +270,23 @@ func Run(opts RunOptions) error {
 	if len(findings) == 0 && opts.Post {
 		if len(clanopyThreads) > 0 && allResolved(clanopyThreads, fixedIndices) {
 			// Re-review: all resolved — minimize old reviews and post all-clear.
-			canPostAllClear := true
+			minimizeFailed := false
 			if nodeIDs, err := FindClanopyReviewNodeIDs(repo, opts.PRNumber); err == nil {
 				for _, nodeID := range nodeIDs {
 					if err := MinimizeComment(nodeID); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: could not minimize review: %v\n", err)
+						minimizeFailed = true
 					}
 				}
-				if len(nodeIDs) > 0 {
+				if len(nodeIDs) > 0 && !minimizeFailed {
 					fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", len(nodeIDs))
 				}
 			} else {
-				// API failed — old reviews may still be visible, skip all-clear
-				// to avoid both being shown at once.
 				fmt.Fprintf(os.Stderr, "Warning: could not fetch reviews for minimization: %v\n", err)
-				canPostAllClear = false
+				minimizeFailed = true
 			}
-			if canPostAllClear {
-				if err := PostAllClearReview(repo, opts.PRNumber); err != nil {
-					return fmt.Errorf("posting all-clear review: %w", err)
-				}
+			if err := PostAllClearReview(repo, opts.PRNumber, minimizeFailed); err != nil {
+				return fmt.Errorf("posting all-clear review: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
 			return nil
