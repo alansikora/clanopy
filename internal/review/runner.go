@@ -42,8 +42,9 @@ func resolveEnv() []string {
 
 // runClaude executes Claude with the given prompt and environment.
 func runClaude(prompt string, env []string) ([]byte, error) {
-	cmd := exec.Command("claude", "--print", "--no-session-persistence", prompt)
+	cmd := exec.Command("claude", "--print", "--no-session-persistence")
 	cmd.Env = env
+	cmd.Stdin = strings.NewReader(prompt)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
