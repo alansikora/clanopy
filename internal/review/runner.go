@@ -382,7 +382,9 @@ func Run(opts RunOptions) error {
 
 			fixedSet := make(map[int]bool, len(fixedIndices))
 			for _, idx := range fixedIndices {
-				fixedSet[idx] = true
+				if idx >= 0 && idx < len(clanopyThreads) {
+					fixedSet[idx] = true
+				}
 			}
 			unresolvedCount := len(clanopyThreads) - len(fixedSet)
 			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", unresolvedCount)
