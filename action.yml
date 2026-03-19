@@ -35,6 +35,8 @@ runs:
         VERSION_FLAG=""
         if [[ "$ACTION_REF" == v* ]]; then
           VERSION_FLAG="--version $ACTION_REF"
+        elif [[ "$ACTION_REF" == "canary" ]]; then
+          VERSION_FLAG="--canary"
         fi
         curl -fsSL https://raw.githubusercontent.com/alansikora/clanopy/main/install.sh | sh -s -- $VERSION_FLAG
         echo "$HOME/.local/bin" >> $GITHUB_PATH
