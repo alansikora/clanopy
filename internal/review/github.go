@@ -98,6 +98,7 @@ type reviewPayload struct {
 	Event    string          `json:"event"`
 	Body     string          `json:"body"`
 	Comments []reviewComment `json:"comments"`
+	CommitID string          `json:"commit_id,omitempty"`
 }
 
 // reviewComment is a single inline comment in a PR review.
@@ -177,7 +178,7 @@ func abs(x int) int {
 // PostReview posts a PR review with inline comments using the GitHub API.
 // Findings with file and line information become inline comments; others are
 // included in the review body.
-func PostReview(repo string, prNumber int, result *ReviewResult, diff string) error {
+func PostReview(repo string, prNumber int, result *ReviewResult, diff string, commitSHA string) error {
 	// Sort findings by severity before formatting.
 	sortFindings(result.Findings)
 
@@ -206,6 +207,7 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string) er
 		Event:    "COMMENT",
 		Body:     body,
 		Comments: comments,
+		CommitID: commitSHA,
 	}
 
 	payloadJSON, err := json.Marshal(payload)
@@ -218,7 +220,11 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string) er
 		return fmt.Errorf("invalid repo format %q, expected owner/name", repo)
 	}
 
-	return ghAPIPOST(fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber), payloadJSON)
+	// No fallback — if this fails, the apiError carries stderr and response
+	// body so the caller surfaces full diagnostics for debugging.
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber)
+	_, err = ghAPIPOST(apiPath, payloadJSON)
+	return err
 }
 
 // FetchReviewFromPR extracts cached review data from a PR review's hidden HTML tag.
@@ -560,37 +566,53 @@ func postSimpleReview(repo string, prNumber int, body string) error {
 		return fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	return ghAPIPOST(fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber), payloadJSON)
+	_, err = ghAPIPOST(fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", parts[0], parts[1], prNumber), payloadJSON)
+	return err
 }
+
+// apiError is returned by ghAPIPOST so callers can inspect the stderr output
+// from gh (which contains the HTTP status line) separately from the response body.
+type apiError struct {
+	Err      error
+	Stderr   string
+	Response string
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("gh api: %v\nstderr: %s\nresponse: %s", e.Err, e.Stderr, e.Response)
+}
+
+func (e *apiError) Unwrap() error { return e.Err }
 
 // ghAPIPOST sends a JSON payload to the GitHub API via gh, using a temp file
 // to avoid stdin pipe issues that can cause "unexpected end of JSON input"
 // errors on large payloads.
-func ghAPIPOST(apiPath string, payloadJSON []byte) error {
+func ghAPIPOST(apiPath string, payloadJSON []byte) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "clanopy-*")
 	if err != nil {
-		return fmt.Errorf("creating temp dir: %w", err)
+		return nil, fmt.Errorf("creating temp dir: %w", err)
 	}
 	defer os.RemoveAll(dir)
 
 	tmpFile, err := os.CreateTemp(dir, "payload.json")
 	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
+		return nil, fmt.Errorf("creating temp file: %w", err)
 	}
 
 	if _, err := tmpFile.Write(payloadJSON); err != nil {
 		tmpFile.Close()
-		return fmt.Errorf("writing payload to temp file: %w", err)
+		return nil, fmt.Errorf("writing payload to temp file: %w", err)
 	}
 	tmpFile.Close()
 
-	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--silent", "--input", tmpFile.Name())
-	var stderr bytes.Buffer
+	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--input", tmpFile.Name())
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gh api create review: %w\n%s", err, stderr.String())
+		return stdout.Bytes(), &apiError{Err: err, Stderr: stderr.String(), Response: stdout.String()}
 	}
-	return nil
+	return stdout.Bytes(), nil
 }
 
 // FindClanopyReviewNodeIDs returns the node_ids of all clanopy reviews on a PR.
