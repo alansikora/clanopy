@@ -308,10 +308,14 @@ func candidateScore(path string) int {
 	return 0
 }
 
-// escapeClosingTag neutralises any literal </tagName> in content so it
-// cannot prematurely close the wrapping XML-like tag in the prompt.
-func escapeClosingTag(content, tagName string) string {
-	return strings.ReplaceAll(content, "</"+tagName+">", "&lt;/"+tagName+"&gt;")
+// escapePromptTag neutralises both opening and closing tag patterns for
+// tagName in content, preventing adversarial repos from injecting fake
+// prompt sections. Escapes <tagName (opening) and </tagName> (closing).
+func escapePromptTag(content, tagName string) string {
+	content = strings.ReplaceAll(content, "</"+tagName+">", "&lt;/"+tagName+"&gt;")
+	content = strings.ReplaceAll(content, "<"+tagName+" ", "&lt;"+tagName+" ")
+	content = strings.ReplaceAll(content, "<"+tagName+">", "&lt;"+tagName+"&gt;")
+	return content
 }
 
 func abs64(n int64) int64 {
@@ -352,7 +356,7 @@ func buildGeneratePrompt(info *RepoInfo) string {
 		b.WriteString("## Project Documentation\n")
 		b.WriteString("These are developer-maintained project docs (CLAUDE.md) describing conventions, architecture, and coding standards. Use these as the primary basis for generating rules.\n\n")
 		for _, path := range slices.Sorted(maps.Keys(info.ProjectDocs)) {
-			safe := escapeClosingTag(info.ProjectDocs[path], "project-doc")
+			safe := escapePromptTag(info.ProjectDocs[path], "project-doc")
 			fmt.Fprintf(&b, "<project-doc path=%q>\n%s\n</project-doc>\n\n", path, safe)
 		}
 	}
@@ -376,7 +380,7 @@ func buildGeneratePrompt(info *RepoInfo) string {
 		b.WriteString("## Code Samples\n")
 		b.WriteString("Representative source files from the project. Use these to understand actual coding patterns, naming conventions, and project structure.\n\n")
 		for _, path := range slices.Sorted(maps.Keys(info.CodeSamples)) {
-			safe := escapeClosingTag(info.CodeSamples[path], "code-sample")
+			safe := escapePromptTag(info.CodeSamples[path], "code-sample")
 			fmt.Fprintf(&b, "<code-sample path=%q>\n%s\n</code-sample>\n\n", path, safe)
 		}
 	}
