@@ -336,6 +336,8 @@ type ReviewThread struct {
 	Path     string
 	Line     int
 	Body     string
+	Author   string // login of the first comment author (the bot for clanopy threads)
+	Outdated bool   // true if GitHub marked the comment position as outdated (code changed)
 	Resolved bool
 	Replies  []ThreadReply
 }
@@ -351,10 +353,11 @@ type graphQLThreadsResponse struct {
 						IsResolved bool   `json:"isResolved"`
 						Comments struct {
 							Nodes []struct {
-								Body   string `json:"body"`
-								Path   string `json:"path"`
-								Line   int    `json:"line"`
-								Author struct {
+								Body     string `json:"body"`
+								Path     string `json:"path"`
+								Line     int    `json:"line"`
+								Outdated bool   `json:"outdated"`
+								Author   struct {
 									Login string `json:"login"`
 								} `json:"author"`
 							} `json:"nodes"`
@@ -382,7 +385,7 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
           id
           isResolved
           comments(first: 100) {
-            nodes { body path line author { login } }
+            nodes { body path line outdated author { login } }
           }
         }
       }
@@ -426,6 +429,8 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 			Path:     comment.Path,
 			Line:     comment.Line,
 			Body:     comment.Body,
+			Author:   comment.Author.Login,
+			Outdated: comment.Outdated,
 			Resolved: node.IsResolved,
 			Replies:  replies,
 		})

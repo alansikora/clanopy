@@ -1,7 +1,6 @@
 package review
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -60,47 +59,6 @@ func runClaude(prompt string, env []string) ([]byte, error) {
 type fixedThread struct {
 	Index  int
 	Reason string // "code_change", "acknowledged", "rebutted", or "" for unknown
-}
-
-// parseFixedThreads extracts thread IDs and reasons from Claude's JSON response.
-// It supports the object format [{"thread":"thread-0","reason":"code_change"}]
-// and falls back to the legacy string format ["thread-0"].
-func parseFixedThreads(output string) []fixedThread {
-	allMatches := jsonFenceRe.FindAllStringSubmatch(output, -1)
-	for _, matches := range allMatches {
-		raw := matches[1]
-
-		// Try object format first.
-		var objs []struct {
-			Thread string `json:"thread"`
-			Reason string `json:"reason"`
-		}
-		if err := json.Unmarshal([]byte(raw), &objs); err == nil && len(objs) > 0 && objs[0].Thread != "" {
-			var result []fixedThread
-			for _, obj := range objs {
-				var idx int
-				if _, err := fmt.Sscanf(obj.Thread, "thread-%d", &idx); err == nil {
-					result = append(result, fixedThread{Index: idx, Reason: obj.Reason})
-				}
-			}
-			return result
-		}
-
-		// Fall back to legacy string array format.
-		var refs []string
-		if err := json.Unmarshal([]byte(raw), &refs); err != nil {
-			continue
-		}
-		var result []fixedThread
-		for _, ref := range refs {
-			var idx int
-			if _, err := fmt.Sscanf(ref, "thread-%d", &idx); err == nil {
-				result = append(result, fixedThread{Index: idx})
-			}
-		}
-		return result
-	}
-	return nil
 }
 
 // allResolved checks if all clanopy threads have been resolved.
@@ -260,59 +218,54 @@ func Run(opts RunOptions) error {
 			fmt.Fprintf(os.Stderr, "Could not compute incremental diff, will use full PR diff for reevaluation\n")
 		}
 
-		// Phase 1: Re-evaluate existing findings.
-		// Use incremental diff when available, otherwise fall back to the full PR diff.
+		// Phase 1: Go-driven triage — classify threads using GitHub's outdated
+		// flag and presence of human replies. Only threads that need evaluation
+		// will trigger a Claude call.
 		reevalDiff := incrementalDiff
 		if diffErr != nil {
 			reevalDiff = pr.Diff
 		}
-		fmt.Fprintf(os.Stderr, "Evaluating %d previous findings against new changes...\n", len(clanopyThreads))
-		reevalPrompt := BuildReevaluatePrompt(clanopyThreads, reevalDiff)
+
+		botLogin := ""
+		if len(clanopyThreads) > 0 {
+			botLogin = clanopyThreads[0].Author
+		}
+		triaged := ClassifyThreads(clanopyThreads, reevalDiff, botLogin)
 
 		if opts.DryRun {
-			fmt.Print(reevalPrompt)
+			LogTriage(triaged)
+			for _, t := range triaged {
+				if t.Class == TriageSkip {
+					continue
+				}
+				fmt.Print("\n---\n\n")
+				fmt.Print(BuildPerThreadPrompt(t, cfg))
+			}
 			fmt.Print("\n---\n\n")
 		} else {
-			reevalOutput, err := runClaude(reevalPrompt, env)
-			if err == nil {
-				fixed = parseFixedThreads(string(reevalOutput))
-				fmt.Fprintf(os.Stderr, "Result: %d fixed, %d still open\n", len(fixed), len(clanopyThreads)-len(fixed))
+			LogTriage(triaged)
+			needsEval := countNonSkipped(triaged)
+			if needsEval > 0 {
+				resolutions := EvaluateThreadsParallel(triaged, env, cfg, 3)
+				LogResolutions(triaged, resolutions)
+				fixed = toFixedThreads(resolutions)
+
+				// Resolve threads on GitHub.
 				for _, f := range fixed {
 					if f.Index >= 0 && f.Index < len(clanopyThreads) {
 						t := clanopyThreads[f.Index]
-						label := t.Path
-						if firstLine := t.Body; firstLine != "" {
-							if nl := strings.Index(firstLine, "\n"); nl >= 0 {
-								firstLine = firstLine[:nl]
-							}
-							label = firstLine
-						}
-						verb := "resolved"
-						reasonSuffix := ""
-						switch f.Reason {
-						case "code_change":
-							verb = "fixed"
-							reasonSuffix = " (code change)"
-						case "acknowledged":
-							verb = "acknowledged"
-							reasonSuffix = " (author acknowledged)"
-						case "rebutted":
-							verb = "rebutted"
-							reasonSuffix = " (author rebutted)"
-						}
+						label := threadLabel(t)
 						if err := ResolveThread(t.ID); err != nil {
 							if strings.Contains(err.Error(), "Resource not accessible") {
-								fmt.Fprintf(os.Stderr, "  ~ %s — %s%s (auto-resolve unavailable: token lacks permission)\n", label, verb, reasonSuffix)
+								fmt.Fprintf(os.Stderr, "  ~ %s (auto-resolve unavailable: token lacks permission)\n", label)
 							} else {
-								fmt.Fprintf(os.Stderr, "  ! %s — %s%s, but failed to resolve thread: %v\n", label, verb, reasonSuffix, err)
+								fmt.Fprintf(os.Stderr, "  ! %s — resolved, but failed to update thread: %v\n", label, err)
 							}
-						} else {
-							fmt.Fprintf(os.Stderr, "  ✓ %s — %s%s\n", label, verb, reasonSuffix)
 						}
 					}
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "Warning: re-evaluation failed: %v\n", err)
+				fmt.Fprintf(os.Stderr, "No threads need re-evaluation — skipping Claude\n")
 			}
 		}
 
@@ -329,6 +282,25 @@ func Run(opts RunOptions) error {
 				unresolved = append(unresolved, t)
 			}
 		}
+
+		// Build resolved context for the incremental review prompt (anti-ping-pong).
+		var resolvedCtx []ResolvedContext
+		for _, f := range fixed {
+			if f.Index >= 0 && f.Index < len(clanopyThreads) {
+				t := clanopyThreads[f.Index]
+				title := t.Body
+				if nl := strings.Index(title, "\n"); nl >= 0 {
+					title = title[:nl]
+				}
+				resolvedCtx = append(resolvedCtx, ResolvedContext{
+					Path:   t.Path,
+					Line:   t.Line,
+					Title:  title,
+					Reason: f.Reason,
+				})
+			}
+		}
+
 		if diffErr != nil {
 			// No incremental diff available — fall back to full review.
 			fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issues excluded)...\n", len(unresolved))
@@ -344,7 +316,7 @@ func Run(opts RunOptions) error {
 				}
 			}
 			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issues excluded)...\n", len(unresolved))
-			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles)
+			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles, resolvedCtx)
 			reviewDiff = incrementalDiff
 		}
 	} else {
