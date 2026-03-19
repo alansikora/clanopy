@@ -355,6 +355,23 @@ func Run(opts RunOptions) error {
 
 	// 11. Post review if requested (uses PR Review API for inline comments).
 	if opts.Post {
+		// Minimize previous clanopy reviews before posting a new one.
+		if len(clanopyThreads) > 0 {
+			if nodeIDs, err := FindClanopyReviewNodeIDs(repo, opts.PRNumber); err == nil {
+				minimized := 0
+				for _, nodeID := range nodeIDs {
+					if err := MinimizeComment(nodeID); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not minimize review: %v\n", err)
+					} else {
+						minimized++
+					}
+				}
+				if minimized > 0 {
+					fmt.Fprintf(os.Stderr, "Minimized %d previous review(s)\n", minimized)
+				}
+			}
+		}
+
 		if len(findings) == 0 {
 			// First review, no issues — post a clean congratulations message.
 			if err := PostCleanReview(repo, opts.PRNumber); err != nil {
