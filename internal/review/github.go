@@ -560,9 +560,11 @@ func ghAPIPOST(apiPath string, payloadJSON []byte) error {
 	}
 	tmpFile.Close()
 
-	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--input", tmpFile.Name())
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("gh api create review: %w\n%s", err, string(out))
+	cmd := exec.Command("gh", "api", apiPath, "--method", "POST", "--silent", "--input", tmpFile.Name())
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gh api create review: %w\n%s", err, stderr.String())
 	}
 	return nil
 }
