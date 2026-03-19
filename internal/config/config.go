@@ -49,7 +49,7 @@ type ResolveResult struct {
 	Worktree      bool
 	AutoMode      bool
 	WorkspaceName string
-	ProjectPath   string // empty if resolved via default workspace fallback
+	ProjectPath   string // empty if workspace was resolved without a matching project
 }
 
 func (c *Config) AddWorkspace(name string) error {
