@@ -215,7 +215,7 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 			case "rebutted":
 				reasonLabel = "rebutted by author"
 			}
-			fmt.Fprintf(&b, "- `%s:%d` — %s\n", r.Path, r.Line, reasonLabel)
+			fmt.Fprintf(&b, "- `%s:%d` (%s) — %s\n", r.Path, r.Line, r.Title, reasonLabel)
 		}
 		b.WriteString("\n")
 	}

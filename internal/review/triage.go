@@ -60,12 +60,15 @@ func ExtractFileDiff(fullDiff, filePath string) string {
 				// We were capturing — new file starts, stop.
 				break
 			}
-			// Check if this is the file we want.
-			// The "+++ b/<path>" line follows "--- a/<path>" or "--- /dev/null".
-			if i+2 < len(lines) && strings.HasPrefix(lines[i+2], "+++ b/"+filePath) {
-				capturing = true
-				// Include the diff header lines.
-				result = append(result, lines[i])
+			// Search ahead for the "+++ b/<path>" header line.
+			// The offset varies (index line, mode lines, etc.) so scan
+			// forward instead of using a fixed offset.
+			for j := i + 1; j < len(lines) && !strings.HasPrefix(lines[j], "diff --git"); j++ {
+				if strings.HasPrefix(lines[j], "+++ b/"+filePath) {
+					capturing = true
+					result = append(result, lines[i])
+					break
+				}
 			}
 			continue
 		}
