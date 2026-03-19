@@ -9,13 +9,25 @@ import (
 )
 
 type ReviewConfig struct {
-	Version      int      `yaml:"version"`
-	Rules        []Rule   `yaml:"rules"`
-	Context      string   `yaml:"context"`
-	Ignore       []string `yaml:"ignore"`
-	MaxFindings  int      `yaml:"max_findings"`
-	MaxFileSize  int      `yaml:"max_file_size"`  // per-file content limit in bytes (default 100KB)
-	MaxTotalSize int      `yaml:"max_total_size"` // total file content limit in bytes (default 500KB)
+	Version      int               `yaml:"version"`
+	Rules        []Rule            `yaml:"rules"`
+	Context      string            `yaml:"context"`
+	Ignore       []string          `yaml:"ignore"`
+	MaxFindings  int               `yaml:"max_findings"`
+	MaxFileSize  int               `yaml:"max_file_size"`  // per-file content limit in bytes (default 100KB)
+	MaxTotalSize int               `yaml:"max_total_size"` // total file content limit in bytes (default 500KB)
+	Evaluation   *EvaluationConfig `yaml:"evaluation"`
+}
+
+// EvaluationConfig holds per-evaluation-type settings for re-evaluation prompts.
+type EvaluationConfig struct {
+	CodeChange EvalTypeConfig `yaml:"code_change"`
+	Reply      EvalTypeConfig `yaml:"reply"`
+}
+
+// EvalTypeConfig holds settings for a specific evaluation type.
+type EvalTypeConfig struct {
+	Context string `yaml:"context"`
 }
 
 // EffectiveMaxFileSize returns the per-file size limit, defaulting to 100KB.

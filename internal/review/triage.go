@@ -1,0 +1,392 @@
+package review
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+)
+
+// ThreadClassification is the triage result for a single unresolved thread.
+type ThreadClassification int
+
+const (
+	TriageSkip             ThreadClassification = iota // no code change, no replies
+	TriageCodeChanged                                  // diff touches finding location (outdated)
+	TriageHasReply                                     // thread has human replies
+	TriageCodeChangedReply                             // both code changed AND has replies
+)
+
+// TriagedThread pairs a ReviewThread with its classification and context.
+type TriagedThread struct {
+	Thread   ReviewThread
+	Index    int                  // original index in the unresolved slice
+	Class    ThreadClassification
+	FileDiff string               // diff hunks for this file only (context for Claude)
+}
+
+// ThreadResolution is the result of a per-thread Claude evaluation.
+type ThreadResolution struct {
+	Index    int
+	Resolved bool
+	Reason   string // "code_change", "acknowledged", "rebutted"
+	Error    error
+}
+
+// threadLabel returns a short label for logging: "path:line — title".
+func threadLabel(t ReviewThread) string {
+	firstLine := t.Body
+	if idx := strings.Index(t.Body, "\n"); idx >= 0 {
+		firstLine = t.Body[:idx]
+	}
+	// Truncate long titles for readability.
+	if len(firstLine) > 80 {
+		firstLine = firstLine[:77] + "..."
+	}
+	return fmt.Sprintf("%s:%d — %s", t.Path, t.Line, firstLine)
+}
+
+// ExtractFileDiff extracts all diff hunks for a specific file from a unified diff.
+func ExtractFileDiff(fullDiff, filePath string) string {
+	lines := strings.Split(fullDiff, "\n")
+	var result []string
+	capturing := false
+
+	for i := 0; i < len(lines); i++ {
+		// Detect start of a new file in the diff.
+		if strings.HasPrefix(lines[i], "diff --git") {
+			if capturing {
+				// We were capturing — new file starts, stop.
+				break
+			}
+			// Search ahead for the "+++ b/<path>" header line.
+			// The offset varies (index line, mode lines, etc.) so scan
+			// forward instead of using a fixed offset.
+			for j := i + 1; j < len(lines) && !strings.HasPrefix(lines[j], "diff --git"); j++ {
+				if strings.HasPrefix(lines[j], "+++ b/"+filePath) {
+					capturing = true
+					result = append(result, lines[i])
+					break
+				}
+			}
+			continue
+		}
+		if capturing {
+			result = append(result, lines[i])
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// ClassifyThreads triages unresolved threads using GitHub's outdated flag and reply presence.
+func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []TriagedThread {
+	result := make([]TriagedThread, len(threads))
+
+	for i, t := range threads {
+		hasReply := hasHumanReply(t, botLogin)
+		outdated := t.Outdated
+
+		var class ThreadClassification
+		switch {
+		case outdated && hasReply:
+			class = TriageCodeChangedReply
+		case outdated:
+			class = TriageCodeChanged
+		case hasReply:
+			class = TriageHasReply
+		default:
+			class = TriageSkip
+		}
+
+		var fileDiff string
+		if outdated {
+			fileDiff = ExtractFileDiff(fullDiff, t.Path)
+		}
+
+		result[i] = TriagedThread{
+			Thread:   t,
+			Index:    i,
+			Class:    class,
+			FileDiff: fileDiff,
+		}
+	}
+
+	return result
+}
+
+// hasHumanReply checks if a thread has at least one reply from a non-bot author.
+func hasHumanReply(t ReviewThread, botLogin string) bool {
+	for _, r := range t.Replies {
+		if r.Author != botLogin {
+			return true
+		}
+	}
+	return false
+}
+
+// BuildPerThreadPrompt dispatches to the appropriate prompt builder based on classification.
+func BuildPerThreadPrompt(t TriagedThread, cfg *ReviewConfig) string {
+	switch t.Class {
+	case TriageCodeChanged:
+		return buildCodeChangePrompt(t, cfg)
+	case TriageHasReply:
+		return buildReplyPrompt(t, cfg)
+	case TriageCodeChangedReply:
+		return buildCodeChangeReplyPrompt(t, cfg)
+	default:
+		return "" // TriageSkip — should not be called
+	}
+}
+
+func buildCodeChangePrompt(t TriagedThread, cfg *ReviewConfig) string {
+	var b strings.Builder
+
+	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author pushed new code.\n\n")
+
+	writeFinding(&b, t.Thread)
+
+	b.WriteString("## Code Changes in This File\n```diff\n")
+	b.WriteString(t.FileDiff)
+	b.WriteString("\n```\n\n")
+
+	if ctx := evalContext(cfg, "code_change"); ctx != "" {
+		fmt.Fprintf(&b, "## Additional Context\n%s\n\n", ctx)
+	}
+
+	b.WriteString("## Task\n")
+	b.WriteString("Does the code change directly address the issue you raised?\n")
+	b.WriteString("- Only answer YES if the change fixes the root cause or removes the problematic code.\n")
+	b.WriteString("- A nearby refactor that doesn't address the finding does NOT count.\n\n")
+	writeResolutionFormat(&b)
+
+	return b.String()
+}
+
+func buildReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
+	var b strings.Builder
+
+	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author replied.\n\n")
+
+	writeFinding(&b, t.Thread)
+	writeReplies(&b, t.Thread)
+
+	if ctx := evalContext(cfg, "reply"); ctx != "" {
+		fmt.Fprintf(&b, "## Additional Context\n%s\n\n", ctx)
+	}
+
+	b.WriteString("## Task\n")
+	b.WriteString("Does the author's reply resolve the finding?\n")
+	b.WriteString("- **Acknowledged**: Reply indicates the finding is intentional, accepted, or tracked elsewhere (e.g. \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\").\n")
+	b.WriteString("- **Rebutted**: Reply provides concrete technical reasoning showing the finding is not applicable. Vague disagreement (\"I don't think so\") does NOT qualify — the reply must cite specific technical details, framework behavior, or project constraints.\n")
+	b.WriteString("- **Not resolved**: Reply is a question, vague disagreement, or does not address the finding.\n\n")
+	writeResolutionFormat(&b)
+
+	return b.String()
+}
+
+func buildCodeChangeReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
+	var b strings.Builder
+
+	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author pushed new code AND replied.\n\n")
+
+	writeFinding(&b, t.Thread)
+	writeReplies(&b, t.Thread)
+
+	b.WriteString("## Code Changes in This File\n```diff\n")
+	b.WriteString(t.FileDiff)
+	b.WriteString("\n```\n\n")
+
+	if ctx := evalContext(cfg, "code_change"); ctx != "" {
+		fmt.Fprintf(&b, "## Additional Context (Code Changes)\n%s\n\n", ctx)
+	}
+	if ctx := evalContext(cfg, "reply"); ctx != "" {
+		fmt.Fprintf(&b, "## Additional Context (Replies)\n%s\n\n", ctx)
+	}
+
+	b.WriteString("## Task\n")
+	b.WriteString("Is the finding resolved? It may be resolved by the code change, the reply, or both.\n")
+	b.WriteString("Evaluate both the code change and the reply.\n\n")
+	writeResolutionFormat(&b)
+
+	return b.String()
+}
+
+// writeFinding writes the finding section to the prompt.
+func writeFinding(b *strings.Builder, t ReviewThread) {
+	b.WriteString("## Finding\n")
+	fmt.Fprintf(b, "File: `%s:%d`\n", t.Path, t.Line)
+	b.WriteString(t.Body)
+	b.WriteString("\n\n")
+}
+
+// writeReplies writes the author replies section to the prompt.
+func writeReplies(b *strings.Builder, t ReviewThread) {
+	if len(t.Replies) == 0 {
+		return
+	}
+	b.WriteString("## Author Replies\n")
+	for _, r := range t.Replies {
+		normalizedBody := strings.ReplaceAll(r.Body, "\n", " ")
+		fmt.Fprintf(b, "> **@%s**: %s\n", r.Author, normalizedBody)
+	}
+	b.WriteString("\n")
+}
+
+// writeResolutionFormat writes the expected JSON response format.
+func writeResolutionFormat(b *strings.Builder) {
+	b.WriteString("Return a JSON object inside a ```json code fence:\n")
+	b.WriteString("- If resolved: `{\"resolved\": true, \"reason\": \"code_change\"}` or `{\"resolved\": true, \"reason\": \"acknowledged\"}` or `{\"resolved\": true, \"reason\": \"rebutted\"}`\n")
+	b.WriteString("- If NOT resolved: `{\"resolved\": false}`\n")
+}
+
+// evalContext returns the evaluation context string for a given type from config.
+func evalContext(cfg *ReviewConfig, evalType string) string {
+	if cfg == nil || cfg.Evaluation == nil {
+		return ""
+	}
+	switch evalType {
+	case "code_change":
+		return cfg.Evaluation.CodeChange.Context
+	case "reply":
+		return cfg.Evaluation.Reply.Context
+	}
+	return ""
+}
+
+// EvaluateThreadsParallel runs Claude in parallel for threads that need evaluation.
+func EvaluateThreadsParallel(triaged []TriagedThread, env []string, cfg *ReviewConfig, maxConcurrent int) []ThreadResolution {
+	results := make([]ThreadResolution, len(triaged))
+
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+
+	for i, t := range triaged {
+		if t.Class == TriageSkip {
+			results[i] = ThreadResolution{Index: t.Index, Resolved: false}
+			continue
+		}
+
+		wg.Add(1)
+		go func(idx int, tt TriagedThread) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			prompt := BuildPerThreadPrompt(tt, cfg)
+			output, err := runClaude(prompt, env)
+			if err != nil {
+				results[idx] = ThreadResolution{Index: tt.Index, Error: err}
+				return
+			}
+			results[idx] = parseThreadResolution(string(output), tt.Index)
+		}(i, t)
+	}
+
+	wg.Wait()
+	return results
+}
+
+// parseThreadResolution parses Claude's JSON response for a single thread evaluation.
+func parseThreadResolution(output string, index int) ThreadResolution {
+	allMatches := jsonFenceRe.FindAllStringSubmatch(output, -1)
+	for _, matches := range allMatches {
+		raw := matches[1]
+
+		var resp struct {
+			Resolved bool   `json:"resolved"`
+			Reason   string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+			continue
+		}
+		return ThreadResolution{
+			Index:    index,
+			Resolved: resp.Resolved,
+			Reason:   resp.Reason,
+		}
+	}
+
+	// If parsing fails, treat as unresolved (conservative).
+	return ThreadResolution{Index: index, Resolved: false}
+}
+
+// LogTriage prints structured triage results to stderr.
+func LogTriage(triaged []TriagedThread) {
+	fmt.Fprintf(os.Stderr, "Re-evaluating %d unresolved thread(s)...\n\n", len(triaged))
+
+	for _, t := range triaged {
+		label := threadLabel(t.Thread)
+		switch t.Class {
+		case TriageSkip:
+			fmt.Fprintf(os.Stderr, "  [skip]     %s — no code changes, no human replies\n", label)
+		case TriageCodeChanged:
+			fmt.Fprintf(os.Stderr, "  [evaluate] %s — code changes detected\n", label)
+		case TriageHasReply:
+			fmt.Fprintf(os.Stderr, "  [evaluate] %s — human reply detected\n", label)
+		case TriageCodeChangedReply:
+			fmt.Fprintf(os.Stderr, "  [evaluate] %s — code changes + human reply detected\n", label)
+		}
+	}
+
+	skipped := 0
+	needsEval := 0
+	for _, t := range triaged {
+		if t.Class == TriageSkip {
+			skipped++
+		} else {
+			needsEval++
+		}
+	}
+	fmt.Fprintf(os.Stderr, "\nTriage result: %d skipped, %d need evaluation\n", skipped, needsEval)
+}
+
+// LogResolutions prints structured evaluation results to stderr.
+func LogResolutions(triaged []TriagedThread, resolutions []ThreadResolution) {
+	fmt.Fprintf(os.Stderr, "\n")
+	for i, r := range resolutions {
+		if triaged[i].Class == TriageSkip {
+			continue
+		}
+		label := threadLabel(triaged[i].Thread)
+		if r.Error != nil {
+			fmt.Fprintf(os.Stderr, "  [error]    %s — evaluation failed: %v\n", label, r.Error)
+		} else if r.Resolved {
+			switch r.Reason {
+			case "code_change":
+				fmt.Fprintf(os.Stderr, "  [resolved] %s — fixed (code change)\n", label)
+			case "acknowledged":
+				fmt.Fprintf(os.Stderr, "  [resolved] %s — acknowledged (author acknowledged)\n", label)
+			case "rebutted":
+				fmt.Fprintf(os.Stderr, "  [resolved] %s — rebutted (author rebutted)\n", label)
+			default:
+				fmt.Fprintf(os.Stderr, "  [resolved] %s — resolved\n", label)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "  [open]     %s — not resolved\n", label)
+		}
+	}
+}
+
+// countNonSkipped returns the number of triaged threads that need evaluation.
+func countNonSkipped(triaged []TriagedThread) int {
+	n := 0
+	for _, t := range triaged {
+		if t.Class != TriageSkip {
+			n++
+		}
+	}
+	return n
+}
+
+// toFixedThreads converts thread resolutions to the fixedThread type used by downstream code.
+func toFixedThreads(resolutions []ThreadResolution) []fixedThread {
+	var result []fixedThread
+	for _, r := range resolutions {
+		if r.Resolved {
+			result = append(result, fixedThread{Index: r.Index, Reason: r.Reason})
+		}
+	}
+	return result
+}

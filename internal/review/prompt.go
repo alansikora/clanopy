@@ -89,9 +89,17 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int) string {
 	return b.String()
 }
 
-// BuildReevaluatePrompt asks Claude which previous findings are now fixed.
-// Each thread is assigned a unique sequential ID (thread-0, thread-1, ...)
-// since threads span multiple review rounds and have no stable external identifier.
+// ResolvedContext describes a finding that was resolved during triage, used to
+// prevent the incremental review from re-raising the same or similar issues.
+type ResolvedContext struct {
+	Path   string
+	Line   int
+	Title  string // first line of the finding body
+	Reason string // "code_change", "acknowledged", "rebutted"
+}
+
+// Deprecated: BuildReevaluatePrompt is replaced by per-thread evaluation in triage.go.
+// Kept temporarily for reference; will be removed in a future release.
 func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) string {
 	var b strings.Builder
 
@@ -134,7 +142,8 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 
 // BuildIncrementalPrompt reviews only new code, avoiding duplicate reports.
 // startIndex is the number of existing findings so fix_ref numbering continues.
-func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, prNumber int, startIndex int, fileContents map[string]string, files []string) string {
+// resolved provides context about recently resolved findings to prevent ping-ponging.
+func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []ReviewThread, prNumber int, startIndex int, fileContents map[string]string, files []string, resolved []ResolvedContext) string {
 	var b strings.Builder
 
 	b.WriteString("You are a code reviewer. Review ONLY the following incremental changes and report NEW findings.\n")
@@ -188,6 +197,29 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 		b.WriteString("These issues are already reported and unresolved. Do NOT report them again:\n\n")
 		for _, t := range knownIssues {
 			fmt.Fprintf(&b, "- `%s:%d`\n", t.Path, t.Line)
+		}
+		b.WriteString("\n")
+	}
+
+	// Recently resolved issues — anti-ping-pong context.
+	if len(resolved) > 0 {
+		b.WriteString("## Recently Resolved Issues\n")
+		b.WriteString("These issues from previous reviews were addressed in this push. Do NOT re-raise them or similar variants.\nIf you find a genuinely new issue in the same area, explain why it is distinct.\n\n")
+		for _, r := range resolved {
+			reasonLabel := r.Reason
+			switch r.Reason {
+			case "code_change":
+				reasonLabel = "fixed by code change"
+			case "acknowledged":
+				reasonLabel = "acknowledged by author"
+			case "rebutted":
+				reasonLabel = "rebutted by author"
+			}
+			if r.Title != "" {
+				fmt.Fprintf(&b, "- `%s:%d` (%s) — %s\n", r.Path, r.Line, r.Title, reasonLabel)
+			} else {
+				fmt.Fprintf(&b, "- `%s:%d` — %s\n", r.Path, r.Line, reasonLabel)
+			}
 		}
 		b.WriteString("\n")
 	}
