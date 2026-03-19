@@ -49,7 +49,7 @@ type ResolveResult struct {
 	Worktree      bool
 	AutoMode      bool
 	WorkspaceName string
-	ProjectPath   string // empty if resolved via default workspace fallback
+	ProjectPath   string // empty if workspace was resolved without a matching project
 }
 
 func (c *Config) AddWorkspace(name string) error {
@@ -263,22 +263,7 @@ func (c *Config) Resolve(dir string) (ResolveResult, error) {
 		return ResolveResult{}, fmt.Errorf("workspace %q not found for project %s", bestProject.Workspace, bestProject.Path)
 	}
 
-	// No project match — try default workspace
-	if c.DefaultWorkspace != "" {
-		for i := range c.Workspaces {
-			if c.Workspaces[i].Name == c.DefaultWorkspace {
-				ws := &c.Workspaces[i]
-				return ResolveResult{
-					SessionDir:    SessionDir(ws.Name),
-					APIKey:        ws.APIKey,
-					Worktree:      ws.Worktree,
-					AutoMode:      c.AutoMode,
-					WorkspaceName: ws.Name,
-				}, nil
-			}
-		}
-	}
-
+	// No project match — prompt user to pick a workspace
 	return ResolveResult{}, ErrUnmapped
 }
 
