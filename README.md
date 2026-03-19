@@ -90,10 +90,10 @@ Re-evaluating 5 unresolved thread(s)...
 Triage result: 2 skipped, 3 need evaluation
 
   [resolved] internal/review/github.go:88 — fixed (code change)
-  [resolved] cmd/review.go:33 — rebutted (author rebutted)
+  [resolved] cmd/review.go:33 — rebutted (human reply accepted)
   [open]     internal/config/load.go:12 — not resolved
 
-Reviewing new changes (1 known issues excluded)...
+Reviewing new changes (1 known issue excluded)...
 Found 0 new findings
 Review posted to PR #42
 ```

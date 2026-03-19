@@ -303,7 +303,11 @@ func Run(opts RunOptions) error {
 
 		if diffErr != nil {
 			// No incremental diff available — fall back to full review.
-			fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issues excluded)...\n", len(unresolved))
+			fbPlural := "s"
+			if len(unresolved) == 1 {
+				fbPlural = ""
+			}
+			fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issue%s excluded)...\n", len(unresolved), fbPlural)
 			prompt = BuildPrompt(pr, cfg, startIndex)
 		} else {
 			// Scope file contents to only files in the incremental diff to
@@ -315,7 +319,11 @@ func Run(opts RunOptions) error {
 					incContents[f] = content
 				}
 			}
-			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issues excluded)...\n", len(unresolved))
+			plural := "s"
+			if len(unresolved) == 1 {
+				plural = ""
+			}
+			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issue%s excluded)...\n", len(unresolved), plural)
 			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles, resolvedCtx)
 			reviewDiff = incrementalDiff
 		}
