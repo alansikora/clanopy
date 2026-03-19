@@ -136,7 +136,7 @@ func BuildReevaluatePrompt(threads []ReviewThread, incrementalDiff string) strin
 	b.WriteString("Return a JSON array of objects for findings that should be resolved inside a ```json code fence.\n")
 	b.WriteString("Each object must have `thread` (the thread ID) and `reason` (one of `code_change`, `dismissed`, `acknowledged`, or `rebutted`).\n")
 	b.WriteString("If none should be resolved, return an empty array: `[]`.\n\n")
-	b.WriteString("Example:\n```json\n[{\"thread\": \"thread-0\", \"reason\": \"code_change\"}, {\"thread\": \"thread-2\", \"reason\": \"rebutted\"}]\n```\n")
+	b.WriteString("Example:\n```json\n[{\"thread\": \"thread-0\", \"reason\": \"code_change\"}, {\"thread\": \"thread-1\", \"reason\": \"dismissed\"}, {\"thread\": \"thread-2\", \"reason\": \"rebutted\"}]\n```\n")
 
 	return b.String()
 }
