@@ -232,7 +232,7 @@ func gatherProjectDocs(info *RepoInfo) {
 			content = content[:maxDocBytes] + "\n... (truncated)"
 		}
 		if totalBytes+len(content) > maxTotalDocBytes {
-			break
+			continue
 		}
 		info.ProjectDocs[p] = content
 		totalBytes += len(content)
