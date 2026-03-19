@@ -312,7 +312,8 @@ func candidateScore(path string) int {
 // preventing adversarial repos from injecting fake prompt sections.
 // Replaces every "<" immediately followed by tagName or /tagName with "&lt;"
 // which covers all variants: opening, closing, self-closing, with or without
-// attributes or whitespace.
+// attributes or whitespace. Only "<" needs escaping — a trailing ">" without
+// a preceding "<tagName" is inert text and cannot form or close a tag.
 func escapePromptTag(content, tagName string) string {
 	content = strings.ReplaceAll(content, "</"+tagName, "&lt;/"+tagName)
 	content = strings.ReplaceAll(content, "<"+tagName, "&lt;"+tagName)
