@@ -38,8 +38,8 @@ export default {
 
       // 3. Extract repository from OIDC claims.
       const repository = payload.repository as string | undefined;
-      if (!repository) {
-        return Response.json({ error: "No repository claim in OIDC token" }, { status: 400 });
+      if (!repository || repository.split("/").length !== 2) {
+        return Response.json({ error: "Invalid or missing repository claim in OIDC token" }, { status: 400 });
       }
 
       // 4. Generate GitHub App JWT.
@@ -54,8 +54,9 @@ export default {
         );
       }
 
-      // 6. Generate a scoped installation token.
-      const [owner, repo] = repository.split("/");
+      // 6. Generate an installation token scoped to the requesting repo.
+      // Permissions are inherited from the App's installation config.
+      const repo = repository.split("/")[1];
       const tokenResponse = await fetch(
         `${GITHUB_API}/app/installations/${installationId}/access_tokens`,
         {
@@ -67,7 +68,6 @@ export default {
           },
           body: JSON.stringify({
             repositories: [repo],
-            permissions: { pull_requests: "write", contents: "read" },
           }),
         }
       );
