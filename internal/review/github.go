@@ -543,11 +543,16 @@ func postSimpleReview(repo string, prNumber int, body string) error {
 // to avoid stdin pipe issues that can cause "unexpected end of JSON input"
 // errors on large payloads.
 func ghAPIPOST(apiPath string, payloadJSON []byte) error {
-	tmpFile, err := os.CreateTemp("", "clanopy-*.json")
+	dir, err := os.MkdirTemp("", "clanopy-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	tmpFile, err := os.CreateTemp(dir, "payload.json")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
 
 	if _, err := tmpFile.Write(payloadJSON); err != nil {
 		tmpFile.Close()
