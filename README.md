@@ -170,6 +170,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  pull-requests: write
 
 jobs:
   review:
@@ -192,7 +193,7 @@ The Clanopy Review app uses a Cloudflare Worker at `token.clanopy.workers.dev` t
 
 If you prefer to run your own, the worker source is in the [`worker/`](worker/) directory:
 
-1. Create your own [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with `pull_requests: write` and `contents: read` permissions
+1. Create your own [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with `pull_requests: write` and `contents: write` permissions
 2. Create a free [Cloudflare](https://workers.cloudflare.com) account
 3. Deploy the worker and set secrets:
    ```bash
