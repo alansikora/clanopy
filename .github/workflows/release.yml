@@ -16,17 +16,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Stamp action.yml for release
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          sed -i "s#install.sh | sh#install.sh | sh -s -- --version $TAG#" action.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add action.yml
-          git commit -m "stamp action version $TAG"
-          git tag -f "$TAG"
-          git push -f origin "$TAG"
-
       - uses: actions/setup-go@v6
         with:
           go-version: stable
