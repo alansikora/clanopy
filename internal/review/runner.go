@@ -109,6 +109,16 @@ func Run(opts RunOptions) error {
 		return fmt.Errorf("fetching PR: %w", err)
 	}
 
+	// 2b. Skip setup PRs (workflow file being added for the first time).
+	if isSetupPR(pr.Diff) {
+		fmt.Fprintf(os.Stderr, "Setup PR detected — skipping review\n")
+		if opts.Post {
+			PostComment(repo, opts.PRNumber,
+				"## \U0001F33F Clanopy Review\n\nSetup PR detected — skipping automated review. Future PRs will be reviewed automatically.")
+		}
+		return nil
+	}
+
 	// 3. Load review config.
 	var cfg *ReviewConfig
 	configPath := opts.ConfigPath

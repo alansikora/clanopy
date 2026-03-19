@@ -572,6 +572,32 @@ func FetchFileContents(files []string, ignorePatterns []string, maxPerFile, maxT
 	return contents, skipped
 }
 
+// isSetupPR detects whether the diff contains a newly added GitHub Actions
+// workflow file that references clanopy (i.e., the initial setup PR).
+func isSetupPR(diff string) bool {
+	lines := strings.Split(diff, "\n")
+	for i := 0; i < len(lines)-1; i++ {
+		if lines[i] != "--- /dev/null" {
+			continue
+		}
+		plusLine := lines[i+1]
+		if !strings.HasPrefix(plusLine, "+++ b/.github/workflows/") {
+			continue
+		}
+		// Check if any added line in this file hunk references clanopy.
+		for j := i + 2; j < len(lines); j++ {
+			// Stop at the next file boundary.
+			if strings.HasPrefix(lines[j], "--- ") || strings.HasPrefix(lines[j], "diff --git") {
+				break
+			}
+			if strings.HasPrefix(lines[j], "+") && strings.Contains(lines[j], "clanopy") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // matchesIgnore checks if a path matches any of the ignore glob patterns.
 func matchesIgnore(path string, patterns []string) bool {
 	for _, pat := range patterns {
