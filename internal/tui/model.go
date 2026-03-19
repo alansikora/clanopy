@@ -27,9 +27,10 @@ const (
 )
 
 type Model struct {
-	cfg     *config.Config
-	version string
-	state   state
+	cfg            *config.Config
+	version        string
+	latestVersion  string // set if a newer version is available
+	state          state
 
 	list   list.Model // workspace list (main view)
 	width  int
@@ -74,11 +75,12 @@ type Model struct {
 	generalOptionsData generalOptionsFormData
 }
 
-func NewModel(cfg *config.Config, version string) *Model {
+func NewModel(cfg *config.Config, version string, latestVersion string) *Model {
 	return &Model{
-		cfg:     cfg,
-		version: version,
-		state:   stateWorkspaceList,
+		cfg:           cfg,
+		version:       version,
+		latestVersion: latestVersion,
+		state:         stateWorkspaceList,
 	}
 }
 
@@ -309,7 +311,11 @@ func (m *Model) View() string {
 
 	switch m.state {
 	case stateWorkspaceList:
-		header := logoStyle.Render(logo) + "  " + versionStyle.Render(m.version) + "\n\n"
+		headerParts := logoStyle.Render(logo) + "  " + versionStyle.Render(m.version)
+		if m.latestVersion != "" {
+			headerParts += "  " + updateStyle.Render(m.latestVersion+" available — run clanopy upgrade")
+		}
+		header := headerParts + "\n\n"
 		content = header + m.list.View()
 	case stateWorkspaceAdding:
 		content = titleStyle.Render("Add Workspace") + "\n\n" + m.wsAddForm.View()
