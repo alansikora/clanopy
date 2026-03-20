@@ -55,6 +55,16 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int) string {
 		fmt.Fprintf(&b, "Limit your output to at most %d findings.\n\n", cfg.MaxFindings)
 	}
 
+	// Explicit allowlist of files in this diff.
+	if len(pr.Files) > 0 {
+		b.WriteString("## Files in This Diff\n")
+		b.WriteString("The following files — and ONLY these files — are part of this diff. Every finding you report MUST reference one of these exact paths. Do NOT reference any file that is not in this list.\n\n")
+		for _, f := range pr.Files {
+			fmt.Fprintf(&b, "- `%s`\n", f)
+		}
+		b.WriteString("\n")
+	}
+
 	// Changed file contents for full context.
 	writeFileContents(&b, pr.FileContents, pr.Files)
 
@@ -67,8 +77,8 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int) string {
 	b.WriteString("## Output Format\n")
 	b.WriteString("Return your findings as a JSON array inside a ```json code fence. Each finding must have these fields:\n\n")
 	b.WriteString("- `id` (string): The rule ID that was violated, or a short kebab-case identifier for general findings.\n")
-	b.WriteString("- `file` (string): The file path where the issue was found. **Must be a file from the diff.** If your finding relates to a file not in the diff (e.g. a downstream consequence), set `file` and `line` to the diff location that triggers the issue and mention the affected file in `description`.\n")
-	b.WriteString("- `line` (int): The line number in the file (must be a changed or adjacent line visible in the diff).\n")
+	b.WriteString("- `file` (string): The file path where the issue was found. **Must be one of the exact paths listed in \"Files in This Diff\" above.** If a file path does not appear in that list, do NOT reference it. If your finding relates to a file not in the diff (e.g. a downstream consequence), set `file` and `line` to the diff location that triggers the issue and mention the affected file in `description`.\n")
+	b.WriteString("- `line` (int): The line number in the file. **Must be a line that was added or modified in the diff** (a `+` line in the diff hunk). If your finding is about a side effect on a distant line, set `line` to the diff line that *causes* the issue and describe the affected location in `description`.\n")
 	b.WriteString("- `severity` (string): One of \"critical\", \"bug\", \"warning\", \"suggestion\", or \"nitpick\".\n")
 	b.WriteString("  - \"critical\": Security vulnerabilities, data loss, crashes.\n")
 	b.WriteString("  - \"bug\": Logic errors, incorrect behavior.\n")
@@ -82,6 +92,7 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int) string {
 	fmt.Fprintf(&b, "- `fix_ref` (string): A reference ID in the format `%d-<index>` where index starts at %d (e.g. `%d-%d`, `%d-%d`).\n", pr.Number, first, pr.Number, first, pr.Number, first+1)
 	b.WriteString("\n**IMPORTANT — JSON escaping:** When your description or suggestion references code containing backslash sequences (e.g. `\\n`, `\\t`, `\\\"`), you MUST double-escape the backslash in the JSON string value. For example, to mention `fmt.Print(\"\\n\")` in a JSON string, write `fmt.Print(\"\\\\n\")`. A single `\\n` in JSON is a newline character, not the literal text `\\n`.\n")
 	b.WriteString("\n**Do not include findings where your conclusion is that the code is correct or no action is needed.** If you evaluate something and determine it is fine, omit it entirely rather than reporting it. Specifically: if you begin analyzing a potential issue but then realize the code handles it correctly, do NOT emit a finding that walks through the concern and then concludes \"this is actually fine\" or \"no bug here\" — simply drop it. Every finding you emit must represent a real, actionable problem.\n")
+	b.WriteString("\n**CRITICAL: Do NOT invent or hallucinate file paths, function names, or code that does not appear in the diff or the provided file contents. If a file or function is not shown above, do not reference it.**\n")
 	b.WriteString("\nIf there are no findings, return an empty array: `[]`.\n")
 	b.WriteString("\nExample:\n```json\n[\n  {\n    \"id\": \"rule-id\",\n    \"file\": \"src/main.go\",\n    \"line\": 42,\n    \"severity\": \"warning\",\n    \"title\": \"Short title\",\n    \"description\": \"Detailed description.\",\n    \"suggestion\": \"Consider doing X instead.\",\n")
 	fmt.Fprintf(&b, "    \"fix_ref\": \"%d-%d\"\n  }\n]\n```\n", pr.Number, first)
@@ -240,7 +251,7 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 	b.WriteString("Return your findings as a JSON array inside a ```json code fence. Each finding must have these fields:\n\n")
 	b.WriteString("- `id` (string): The rule ID that was violated, or a short kebab-case identifier for general findings.\n")
 	b.WriteString("- `file` (string): The file path where the issue was found. **Must be one of the exact paths listed in \"Files in This Diff\" above.** If a file path does not appear in that list, do NOT reference it. If your finding relates to a downstream file not in the diff, set `file` and `line` to the diff location that triggers the issue and mention the affected file in `description`.\n")
-	b.WriteString("- `line` (int): The line number in the file (must be a changed or adjacent line visible in the diff).\n")
+	b.WriteString("- `line` (int): The line number in the file. **Must be a line that was added or modified in the diff** (a `+` line in the diff hunk). If your finding is about a side effect on a distant line, set `line` to the diff line that *causes* the issue and describe the affected location in `description`.\n")
 	b.WriteString("- `severity` (string): One of \"critical\", \"bug\", \"warning\", \"suggestion\", or \"nitpick\".\n")
 	b.WriteString("  - \"critical\": Security vulnerabilities, data loss, crashes.\n")
 	b.WriteString("  - \"bug\": Logic errors, incorrect behavior.\n")

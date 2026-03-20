@@ -210,6 +210,7 @@ func Run(opts RunOptions) error {
 	previousSHA := FetchPreviousReviewSHA(repo, opts.PRNumber)
 
 	var prompt string
+	var reviewDiff string // the diff that was sent to Claude (for post-processing validation)
 	var fixed []fixedThread
 	if len(clanopyThreads) > 0 && previousSHA != "" {
 		// Incremental review.
@@ -318,6 +319,7 @@ func Run(opts RunOptions) error {
 			}
 			fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issue%s excluded)...\n", len(unresolved), fbPlural)
 			prompt = BuildPrompt(pr, cfg, startIndex)
+			reviewDiff = pr.Diff
 		} else {
 			// Scope file contents to only files in the incremental diff to
 			// prevent hallucinations about unrelated files from the full PR.
@@ -334,11 +336,13 @@ func Run(opts RunOptions) error {
 			}
 			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issue%s excluded)...\n", len(unresolved), plural)
 			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles, resolvedCtx)
+			reviewDiff = incrementalDiff
 		}
 	} else {
 		// First review — full PR diff.
 		fmt.Fprintf(os.Stderr, "Reviewing PR #%d...\n", opts.PRNumber)
 		prompt = BuildPrompt(pr, cfg, startIndex)
+		reviewDiff = pr.Diff
 	}
 
 	// 5. Dry run — print prompt and return.
@@ -372,6 +376,26 @@ func Run(opts RunOptions) error {
 		}
 	}
 	findings = filteredFindings
+
+	// Distance filter: drop findings too far from any actual diff line.
+	// This catches hallucinations about code visible in file contents but
+	// not part of the PR's changes. Uses the same diff that was sent to
+	// Claude (incrementalDiff for re-reviews, pr.Diff for first reviews).
+	validLines := parseDiffLines(reviewDiff)
+	var distFiltered []Finding
+	for _, f := range findings {
+		if f.File == "" || f.Line == 0 {
+			distFiltered = append(distFiltered, f)
+			continue
+		}
+		nearest := validLines.nearestLine(f.File, f.Line)
+		if nearest == 0 || abs(f.Line-nearest) > MaxFindingDistance {
+			fmt.Fprintf(os.Stderr, "Dropped finding on %s:%d (nearest diff line: %d, distance: %d)\n", f.File, f.Line, nearest, abs(f.Line-nearest))
+			continue
+		}
+		distFiltered = append(distFiltered, f)
+	}
+	findings = distFiltered
 
 	if len(findings) == 0 {
 		fmt.Fprintf(os.Stderr, "No new findings\n")
