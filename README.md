@@ -144,7 +144,7 @@ The `evaluation` section is optional. When set, `code_change.context` is injecte
 
 ### GitHub Action
 
-Add automated PR reviews to your CI:
+Add automated PR reviews to your CI with the [`clanopy-review`](https://github.com/alansikora/clanopy-review) action:
 
 ```bash
 clanopy review init
@@ -183,6 +183,8 @@ jobs:
 ```
 
 The `id-token: write` permission is required for the action to authenticate with the Clanopy Review app. The app must be installed on the repo — run `clanopy review init` to set everything up.
+
+See the [clanopy-review action repo](https://github.com/alansikora/clanopy-review) for all available inputs.
 
 </details>
 
