@@ -85,7 +85,7 @@ var reviewInitCmd = &cobra.Command{
 			authEnv = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
 		}
 
-		actionRef := "review-v1"
+		actionRef := "v1"
 
 		workflow := fmt.Sprintf(`name: Clanopy Review
 on:
@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: alansikora/clanopy@%s
+      - uses: alansikora/clanopy-review@%s
         with:
 %s
           config_path: .clanopy/review.yml

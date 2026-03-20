@@ -26,8 +26,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update review-v1 action tag
-        run: |
-          git tag -f review-v1
-          git push -f origin review-v1
