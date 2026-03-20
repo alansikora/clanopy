@@ -40,8 +40,13 @@ func resolveEnv() []string {
 }
 
 // runClaude executes Claude with the given prompt and environment.
-func runClaude(prompt string, env []string) ([]byte, error) {
-	cmd := exec.Command("claude", "--print", "--no-session-persistence")
+// When model is non-empty, it is passed via --model (e.g. "haiku", "sonnet").
+func runClaude(prompt string, env []string, model string) ([]byte, error) {
+	args := []string{"--print", "--no-session-persistence"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	cmd := exec.Command("claude", args...)
 	cmd.Env = env
 	cmd.Stdin = strings.NewReader(prompt)
 	output, err := cmd.Output()
@@ -212,6 +217,14 @@ func Run(opts RunOptions) error {
 		incrementalDiff, diffErr := GetIncrementalDiff(previousSHA)
 		if diffErr != nil {
 			fmt.Fprintf(os.Stderr, "Could not compute incremental diff, will use full PR diff for reevaluation\n")
+		} else {
+			// Scope incremental diff to only PR files to exclude main-branch
+			// changes pulled in by rebases.
+			allowed := make(map[string]bool, len(pr.Files))
+			for _, f := range pr.Files {
+				allowed[f] = true
+			}
+			incrementalDiff = ScopeDiffToFiles(incrementalDiff, allowed)
 		}
 
 		// Phase 1: Go-driven triage — classify threads using GitHub's outdated
@@ -242,7 +255,7 @@ func Run(opts RunOptions) error {
 			LogTriage(triaged)
 			needsEval := countNonSkipped(triaged)
 			if needsEval > 0 {
-				resolutions := EvaluateThreadsParallel(triaged, env, cfg, 3)
+				resolutions := EvaluateThreadsParallel(triaged, env, cfg, 3, "haiku")
 				LogResolutions(triaged, resolutions)
 				fixed = toFixedThreads(resolutions)
 
@@ -335,7 +348,7 @@ func Run(opts RunOptions) error {
 	}
 
 	// 6. Run Claude.
-	claudeOutput, err := runClaude(prompt, env)
+	claudeOutput, err := runClaude(prompt, env, "")
 	if err != nil {
 		return err
 	}
@@ -345,6 +358,21 @@ func Run(opts RunOptions) error {
 	if err != nil {
 		return fmt.Errorf("parsing findings: %w", err)
 	}
+	// Safety net: drop findings on files not in the PR.
+	prFileSet := make(map[string]bool, len(pr.Files))
+	for _, f := range pr.Files {
+		prFileSet[f] = true
+	}
+	var filteredFindings []Finding
+	for _, f := range findings {
+		if f.File == "" || prFileSet[f.File] {
+			filteredFindings = append(filteredFindings, f)
+		} else {
+			fmt.Fprintf(os.Stderr, "Dropped finding on non-PR file: %s\n", f.File)
+		}
+	}
+	findings = filteredFindings
+
 	if len(findings) == 0 {
 		fmt.Fprintf(os.Stderr, "No new findings\n")
 	} else {

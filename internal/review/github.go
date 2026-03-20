@@ -523,6 +523,53 @@ func FilesFromDiff(diff string) []string {
 	return files
 }
 
+// ScopeDiffToFiles filters a unified diff to only include hunks for files in
+// the allowed set. This prevents rebase noise (main-branch changes) from
+// leaking into incremental reviews.
+func ScopeDiffToFiles(diff string, allowedFiles map[string]bool) string {
+	if len(allowedFiles) == 0 {
+		return diff
+	}
+
+	lines := strings.Split(diff, "\n")
+	var result []string
+	blockStart := -1
+	blockAllowed := false
+
+	for i := 0; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "diff --git") {
+			// Flush previous block if allowed.
+			if blockStart >= 0 && blockAllowed {
+				result = append(result, lines[blockStart:i]...)
+			}
+			blockStart = i
+			blockAllowed = false
+
+			// Look ahead for +++ b/<path> to determine if this block is allowed.
+			for j := i + 1; j < len(lines) && !strings.HasPrefix(lines[j], "diff --git"); j++ {
+				if strings.HasPrefix(lines[j], "+++ b/") {
+					path := strings.TrimRight(lines[j][6:], "\r")
+					if allowedFiles[path] {
+						blockAllowed = true
+					}
+					break
+				}
+			}
+			continue
+		}
+	}
+
+	// Flush last block.
+	if blockStart >= 0 && blockAllowed {
+		result = append(result, lines[blockStart:]...)
+	}
+
+	if len(result) == 0 {
+		return ""
+	}
+	return strings.Join(result, "\n")
+}
+
 // GetIncrementalDiff gets the diff since a given SHA.
 func GetIncrementalDiff(baseSHA string) (string, error) {
 	// Ensure the base SHA is available locally (shallow clones may not have it).
