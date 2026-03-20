@@ -178,9 +178,9 @@ func buildCodeChangePrompt(t TriagedThread, cfg *ReviewConfig) string {
 
 	b.WriteString("## Task\n")
 	b.WriteString("Does the code change address the issue you raised?\n")
-	b.WriteString("- Answer YES if the change fixes the root cause, removes the problematic code, or modifies the code in a way that makes the finding no longer applicable.\n")
+	b.WriteString("- Answer YES if the change fixes the root cause, removes the problematic code, or meaningfully changes the code so the finding no longer applies.\n")
 	b.WriteString("- A change to nearby or adjacent code counts IF it effectively resolves the concern (e.g. fixing the logic, adding the missing check, refactoring the problematic pattern).\n")
-	b.WriteString("- Only answer NO if the finding's concern clearly remains unaddressed after reviewing all changes in the diff.\n\n")
+	b.WriteString("- Answer NO if the finding's concern is still present in the changed code.\n\n")
 	writeResolutionFormat(&b)
 
 	return b.String()
