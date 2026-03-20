@@ -10,6 +10,11 @@ import (
 	"strings"
 )
 
+// MaxFindingDistance is the maximum number of lines a finding may be from the
+// nearest diff line before it is dropped (runner.go) or demoted from inline
+// to body (PostReview). A single constant ensures both checks stay in sync.
+const MaxFindingDistance = 20
+
 // PRData holds PR metadata and diff.
 type PRData struct {
 	Number       int
@@ -188,13 +193,12 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string, co
 	// A finding can be inlined if its file is in the diff and the nearest
 	// valid line is within a reasonable distance. Without a bound, findings
 	// about code far from the diff get silently snapped to unrelated lines.
-	const maxSnapDistance = 20
 	canInline := func(f Finding) bool {
 		if f.File == "" || f.Line <= 0 {
 			return false
 		}
 		nearest := validLines.nearestLine(f.File, f.Line)
-		return nearest > 0 && abs(f.Line-nearest) <= maxSnapDistance
+		return nearest > 0 && abs(f.Line-nearest) <= MaxFindingDistance
 	}
 
 	comments := make([]reviewComment, 0)
