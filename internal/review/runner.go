@@ -373,6 +373,26 @@ func Run(opts RunOptions) error {
 	}
 	findings = filteredFindings
 
+	// Distance filter: drop findings too far from any actual diff line.
+	// This catches hallucinations about code visible in file contents but
+	// not part of the PR's changes.
+	validLines := parseDiffLines(pr.Diff)
+	const maxLineDistance = 20
+	var distFiltered []Finding
+	for _, f := range findings {
+		if f.File == "" || f.Line == 0 {
+			distFiltered = append(distFiltered, f)
+			continue
+		}
+		nearest := validLines.nearestLine(f.File, f.Line)
+		if nearest == 0 || abs(f.Line-nearest) > maxLineDistance {
+			fmt.Fprintf(os.Stderr, "Dropped finding on %s:%d (nearest diff line: %d, distance: %d)\n", f.File, f.Line, nearest, abs(f.Line-nearest))
+			continue
+		}
+		distFiltered = append(distFiltered, f)
+	}
+	findings = distFiltered
+
 	if len(findings) == 0 {
 		fmt.Fprintf(os.Stderr, "No new findings\n")
 	} else {

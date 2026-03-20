@@ -185,9 +185,16 @@ func PostReview(repo string, prNumber int, result *ReviewResult, diff string, co
 	// Parse the diff to find valid line positions for inline comments.
 	validLines := parseDiffLines(diff)
 
-	// A finding can be inlined if its file is in the diff.
+	// A finding can be inlined if its file is in the diff and the nearest
+	// valid line is within a reasonable distance. Without a bound, findings
+	// about code far from the diff get silently snapped to unrelated lines.
+	const maxSnapDistance = 20
 	canInline := func(f Finding) bool {
-		return f.File != "" && f.Line > 0 && validLines.nearestLine(f.File, f.Line) > 0
+		if f.File == "" || f.Line <= 0 {
+			return false
+		}
+		nearest := validLines.nearestLine(f.File, f.Line)
+		return nearest > 0 && abs(f.Line-nearest) <= maxSnapDistance
 	}
 
 	comments := make([]reviewComment, 0)
