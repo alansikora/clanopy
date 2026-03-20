@@ -212,6 +212,14 @@ func Run(opts RunOptions) error {
 		incrementalDiff, diffErr := GetIncrementalDiff(previousSHA)
 		if diffErr != nil {
 			fmt.Fprintf(os.Stderr, "Could not compute incremental diff, will use full PR diff for reevaluation\n")
+		} else {
+			// Scope incremental diff to only PR files to exclude main-branch
+			// changes pulled in by rebases.
+			allowed := make(map[string]bool, len(pr.Files))
+			for _, f := range pr.Files {
+				allowed[f] = true
+			}
+			incrementalDiff = ScopeDiffToFiles(incrementalDiff, allowed)
 		}
 
 		// Phase 1: Go-driven triage — classify threads using GitHub's outdated
@@ -345,6 +353,21 @@ func Run(opts RunOptions) error {
 	if err != nil {
 		return fmt.Errorf("parsing findings: %w", err)
 	}
+	// Safety net: drop findings on files not in the PR.
+	prFileSet := make(map[string]bool, len(pr.Files))
+	for _, f := range pr.Files {
+		prFileSet[f] = true
+	}
+	var filteredFindings []Finding
+	for _, f := range findings {
+		if f.File == "" || prFileSet[f.File] {
+			filteredFindings = append(filteredFindings, f)
+		} else {
+			fmt.Fprintf(os.Stderr, "Dropped finding on non-PR file: %s\n", f.File)
+		}
+	}
+	findings = filteredFindings
+
 	if len(findings) == 0 {
 		fmt.Fprintf(os.Stderr, "No new findings\n")
 	} else {

@@ -12,10 +12,11 @@ import (
 type ThreadClassification int
 
 const (
-	TriageSkip             ThreadClassification = iota // no code change, no replies
+	TriageSkip             ThreadClassification = iota // no code changes at all
 	TriageCodeChanged                                  // diff touches finding location (outdated)
 	TriageHasReply                                     // thread has human replies
 	TriageCodeChangedReply                             // both code changed AND has replies
+	TriageCrossFileChange                              // diff has changes but NOT in this thread's file
 )
 
 // TriagedThread pairs a ReviewThread with its classification and context.
@@ -102,6 +103,9 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 			// affecting the exact commented range.
 			if fileInDiff(fullDiff, t.Path) {
 				class = TriageCodeChanged
+			} else if fullDiff != "" {
+				// Code changed in other files — evaluate in case the fix is cross-file.
+				class = TriageCrossFileChange
 			} else {
 				class = TriageSkip
 			}
@@ -110,6 +114,8 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 		var fileDiff string
 		if class == TriageCodeChanged || class == TriageCodeChangedReply {
 			fileDiff = ExtractFileDiff(fullDiff, t.Path)
+		} else if class == TriageCrossFileChange {
+			fileDiff = fullDiff
 		}
 
 		result[i] = TriagedThread{
@@ -148,6 +154,8 @@ func BuildPerThreadPrompt(t TriagedThread, cfg *ReviewConfig) string {
 		return buildReplyPrompt(t, cfg)
 	case TriageCodeChangedReply:
 		return buildCodeChangeReplyPrompt(t, cfg)
+	case TriageCrossFileChange:
+		return buildCrossFilePrompt(t, cfg)
 	default:
 		return "" // TriageSkip — should not be called
 	}
@@ -169,9 +177,10 @@ func buildCodeChangePrompt(t TriagedThread, cfg *ReviewConfig) string {
 	}
 
 	b.WriteString("## Task\n")
-	b.WriteString("Does the code change directly address the issue you raised?\n")
-	b.WriteString("- Only answer YES if the change fixes the root cause or removes the problematic code.\n")
-	b.WriteString("- A nearby refactor that doesn't address the finding does NOT count.\n\n")
+	b.WriteString("Does the code change address the issue you raised?\n")
+	b.WriteString("- Answer YES if the change fixes the root cause, removes the problematic code, or modifies the code in a way that makes the finding no longer applicable.\n")
+	b.WriteString("- A change to nearby or adjacent code counts IF it effectively resolves the concern (e.g. fixing the logic, adding the missing check, refactoring the problematic pattern).\n")
+	b.WriteString("- Only answer NO if the finding's concern clearly remains unaddressed after reviewing all changes in the diff.\n\n")
 	writeResolutionFormat(&b)
 
 	return b.String()
@@ -222,11 +231,35 @@ func buildCodeChangeReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
 	b.WriteString("## Task\n")
 	b.WriteString("Is the finding resolved? It may be resolved by the code change, the reply, or both.\n")
 	b.WriteString("Evaluate both the code change and the reply.\n\n")
-	b.WriteString("- **Fixed by code change**: The new diff directly addresses the issue you raised — the root cause is removed or corrected.\n")
+	b.WriteString("- **Fixed by code change**: The new diff addresses the issue you raised — the root cause is fixed, removed, or the code is changed in a way that makes the finding no longer applicable.\n")
 	b.WriteString("- **Dismissed**: Reply explicitly asks the reviewer to dismiss, ignore, or skip the finding (e.g. \"dismiss this\", \"you can safely dismiss\", \"please ignore\", \"skip this one\"). The author is exercising their authority to close the thread without further justification.\n")
 	b.WriteString("- **Acknowledged**: Reply indicates the finding is intentional, accepted, or tracked elsewhere (e.g. \"intentional\", \"will fix in a future PR\", \"tracked in issue #N\").\n")
 	b.WriteString("- **Rebutted**: Reply provides concrete technical reasoning showing the finding is not applicable. Vague disagreement (\"I don't think so\") does NOT qualify — the reply must cite specific technical details, framework behavior, or project constraints.\n")
 	b.WriteString("- **Not resolved**: Reply is a question, vague disagreement, or does not address the finding.\n\n")
+	writeResolutionFormat(&b)
+
+	return b.String()
+}
+
+func buildCrossFilePrompt(t TriagedThread, cfg *ReviewConfig) string {
+	var b strings.Builder
+
+	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author pushed new code, but the changes are in DIFFERENT files from where you left your finding.\n\n")
+
+	writeFinding(&b, t.Thread)
+
+	b.WriteString("## All Code Changes\n```diff\n")
+	b.WriteString(t.FileDiff)
+	b.WriteString("\n```\n\n")
+
+	if ctx := evalContext(cfg, "code_change"); ctx != "" {
+		fmt.Fprintf(&b, "## Additional Context\n%s\n\n", ctx)
+	}
+
+	b.WriteString("## Task\n")
+	b.WriteString("Does any change in this diff address the issue you raised, even though the changes are in different files?\n")
+	b.WriteString("- Answer YES if a change in another file effectively resolves the concern (e.g. fixing the caller instead of the callee, adding validation in a different layer, removing the code path that triggers the issue).\n")
+	b.WriteString("- Answer NO if none of the changes are related to the finding.\n\n")
 	writeResolutionFormat(&b)
 
 	return b.String()
@@ -346,6 +379,8 @@ func LogTriage(triaged []TriagedThread) {
 			fmt.Fprintf(os.Stderr, "  [evaluate] %s — human reply detected\n", label)
 		case TriageCodeChangedReply:
 			fmt.Fprintf(os.Stderr, "  [evaluate] %s — code changes + human reply detected\n", label)
+		case TriageCrossFileChange:
+			fmt.Fprintf(os.Stderr, "  [evaluate] %s — cross-file changes detected\n", label)
 		}
 	}
 
