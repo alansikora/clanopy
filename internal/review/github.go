@@ -466,6 +466,19 @@ func ResolveThread(threadID string) error {
 	return nil
 }
 
+// ReplyToThread posts a reply on a review thread via GraphQL.
+func ReplyToThread(threadID, body string) error {
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query=mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}",
+		"-f", "threadId="+threadID,
+		"-f", "body="+body,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh api graphql reply: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
 // ghReview is the JSON shape for a PR review from the REST API.
 type ghReview struct {
 	NodeID string `json:"node_id"`

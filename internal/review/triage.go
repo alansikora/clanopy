@@ -25,6 +25,7 @@ type TriagedThread struct {
 	Index    int                  // original index in the unresolved slice
 	Class    ThreadClassification
 	FileDiff string               // diff hunks for this file only (context for Claude)
+	BotLogin string               // login of the clanopy bot, for filtering replies
 }
 
 // ThreadResolution is the result of a per-thread Claude evaluation.
@@ -86,7 +87,7 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 	result := make([]TriagedThread, len(threads))
 
 	for i, t := range threads {
-		hasReply := hasHumanReply(t, botLogin)
+		hasReply := hasNewHumanReply(t, botLogin)
 		outdated := t.Outdated
 
 		var class ThreadClassification
@@ -123,6 +124,7 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 			Index:    i,
 			Class:    class,
 			FileDiff: fileDiff,
+			BotLogin: botLogin,
 		}
 	}
 
@@ -138,6 +140,37 @@ func fileInDiff(diff, path string) bool {
 // hasHumanReply checks if a thread has at least one reply from a non-bot author.
 func hasHumanReply(t ReviewThread, botLogin string) bool {
 	for _, r := range t.Replies {
+		if r.Author != botLogin {
+			return true
+		}
+	}
+	return false
+}
+
+// clanopyAckMarker is the prefix of HTML markers embedded in clanopy ack replies.
+const clanopyAckMarker = "<!-- clanopy:ack:"
+
+// isClanopyAckReply checks if a reply body contains a clanopy acknowledgment marker.
+func isClanopyAckReply(body string) bool {
+	return strings.Contains(body, clanopyAckMarker)
+}
+
+// hasNewHumanReply checks if a thread has a human reply AFTER the last clanopy
+// ack reply. If no ack reply exists, it falls back to hasHumanReply behavior.
+// Replies are in chronological order.
+func hasNewHumanReply(t ReviewThread, botLogin string) bool {
+	lastAckIdx := -1
+	for i, r := range t.Replies {
+		if r.Author == botLogin && isClanopyAckReply(r.Body) {
+			lastAckIdx = i
+		}
+	}
+	if lastAckIdx == -1 {
+		// No ack reply exists — fall back to standard check.
+		return hasHumanReply(t, botLogin)
+	}
+	// Check for human replies after the last ack.
+	for _, r := range t.Replies[lastAckIdx+1:] {
 		if r.Author != botLogin {
 			return true
 		}
@@ -192,7 +225,7 @@ func buildReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
 	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author replied.\n\n")
 
 	writeFinding(&b, t.Thread)
-	writeReplies(&b, t.Thread)
+	writeReplies(&b, t.Thread, t.BotLogin)
 
 	if ctx := evalContext(cfg, "reply"); ctx != "" {
 		fmt.Fprintf(&b, "## Additional Context\n%s\n\n", ctx)
@@ -215,7 +248,7 @@ func buildCodeChangeReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
 	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author pushed new code AND replied.\n\n")
 
 	writeFinding(&b, t.Thread)
-	writeReplies(&b, t.Thread)
+	writeReplies(&b, t.Thread, t.BotLogin)
 
 	b.WriteString("## Code Changes in This File\n```diff\n")
 	b.WriteString(t.FileDiff)
@@ -274,12 +307,25 @@ func writeFinding(b *strings.Builder, t ReviewThread) {
 }
 
 // writeReplies writes the author replies section to the prompt.
-func writeReplies(b *strings.Builder, t ReviewThread) {
+// Bot replies are filtered out so clanopy's own acknowledgment messages
+// don't leak into the Claude prompt and bias evaluation.
+func writeReplies(b *strings.Builder, t ReviewThread, botLogin string) {
 	if len(t.Replies) == 0 {
 		return
 	}
-	b.WriteString("## Author Replies\n")
+	// Filter out bot replies using explicit botLogin, consistent with
+	// hasHumanReply and hasNewHumanReply.
+	var humanReplies []ThreadReply
 	for _, r := range t.Replies {
+		if r.Author != botLogin {
+			humanReplies = append(humanReplies, r)
+		}
+	}
+	if len(humanReplies) == 0 {
+		return
+	}
+	b.WriteString("## Author Replies\n")
+	for _, r := range humanReplies {
 		normalizedBody := strings.ReplaceAll(r.Body, "\n", " ")
 		fmt.Fprintf(b, "> **@%s**: %s\n", r.Author, normalizedBody)
 	}
@@ -411,11 +457,11 @@ func LogResolutions(triaged []TriagedThread, resolutions []ThreadResolution) {
 			case "code_change":
 				fmt.Fprintf(os.Stderr, "  [resolved] %s — fixed by code change\n", label)
 			case "dismissed":
-				fmt.Fprintf(os.Stderr, "  [resolved] %s — dismissed by author\n", label)
+				fmt.Fprintf(os.Stderr, "  [ack]      %s — dismissed by author (keeping open)\n", label)
 			case "acknowledged":
-				fmt.Fprintf(os.Stderr, "  [resolved] %s — acknowledged by author\n", label)
+				fmt.Fprintf(os.Stderr, "  [ack]      %s — acknowledged by author (keeping open)\n", label)
 			case "rebutted":
-				fmt.Fprintf(os.Stderr, "  [resolved] %s — rebutted by author\n", label)
+				fmt.Fprintf(os.Stderr, "  [ack]      %s — rebutted by author (keeping open)\n", label)
 			default:
 				fmt.Fprintf(os.Stderr, "  [resolved] %s — resolved\n", label)
 			}
