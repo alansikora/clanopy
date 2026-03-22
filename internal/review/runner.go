@@ -403,8 +403,11 @@ func Run(opts RunOptions) error {
 	}
 
 	// 8b. Cache result for later use by `clanopy fix`.
-	if err := SaveResult(result); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to cache review result: %v\n", err)
+	// Skip in reply-only mode to avoid overwriting the existing cache with empty findings.
+	if !opts.ReplyOnly {
+		if err := SaveResult(result); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to cache review result: %v\n", err)
+		}
 	}
 
 	// 9. Format output.
