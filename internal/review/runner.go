@@ -18,6 +18,7 @@ type RunOptions struct {
 	Output     string // "markdown" or "json"
 	Post       bool
 	DryRun     bool
+	ReplyOnly  bool // evaluate thread replies only, skip new findings
 }
 
 // resolveEnv builds the environment for Claude, resolving workspace config.
@@ -209,6 +210,12 @@ func Run(opts RunOptions) error {
 	}
 	previousSHA := FetchPreviousReviewSHA(repo, opts.PRNumber)
 
+	// Reply-only mode: bail early if there are no threads to evaluate.
+	if opts.ReplyOnly && (len(clanopyThreads) == 0 || previousSHA == "") {
+		fmt.Fprintf(os.Stderr, "No previous review threads to evaluate\n")
+		return nil
+	}
+
 	var prompt string
 	var fixed []fixedThread
 	if len(clanopyThreads) > 0 && previousSHA != "" {
@@ -278,62 +285,64 @@ func Run(opts RunOptions) error {
 			}
 		}
 
-		// Phase 2: Build review prompt.
-		fixedSet := make(map[int]bool, len(fixed))
-		for _, f := range fixed {
-			if f.Index >= 0 && f.Index < len(clanopyThreads) {
-				fixedSet[f.Index] = true
-			}
-		}
-		var unresolved []ReviewThread
-		for i, t := range clanopyThreads {
-			if !fixedSet[i] {
-				unresolved = append(unresolved, t)
-			}
-		}
-
-		// Build resolved context for the incremental review prompt (anti-ping-pong).
-		var resolvedCtx []ResolvedContext
-		for _, f := range fixed {
-			if f.Index >= 0 && f.Index < len(clanopyThreads) {
-				t := clanopyThreads[f.Index]
-				title := t.Body
-				if nl := strings.Index(title, "\n"); nl >= 0 {
-					title = title[:nl]
-				}
-				resolvedCtx = append(resolvedCtx, ResolvedContext{
-					Path:   t.Path,
-					Line:   t.Line,
-					Title:  title,
-					Reason: f.Reason,
-				})
-			}
-		}
-
-		if diffErr != nil {
-			// No incremental diff available — fall back to full review.
-			fbPlural := "s"
-			if len(unresolved) == 1 {
-				fbPlural = ""
-			}
-			fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issue%s excluded)...\n", len(unresolved), fbPlural)
-			prompt = BuildPrompt(pr, cfg, startIndex)
-		} else {
-			// Scope file contents to only files in the incremental diff to
-			// prevent hallucinations about unrelated files from the full PR.
-			incFiles := FilesFromDiff(incrementalDiff)
-			incContents := make(map[string]string, len(incFiles))
-			for _, f := range incFiles {
-				if content, ok := pr.FileContents[f]; ok {
-					incContents[f] = content
+		if !opts.ReplyOnly {
+			// Phase 2: Build review prompt for new findings.
+			fixedSet := make(map[int]bool, len(fixed))
+			for _, f := range fixed {
+				if f.Index >= 0 && f.Index < len(clanopyThreads) {
+					fixedSet[f.Index] = true
 				}
 			}
-			plural := "s"
-			if len(unresolved) == 1 {
-				plural = ""
+			var unresolved []ReviewThread
+			for i, t := range clanopyThreads {
+				if !fixedSet[i] {
+					unresolved = append(unresolved, t)
+				}
 			}
-			fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issue%s excluded)...\n", len(unresolved), plural)
-			prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles, resolvedCtx)
+
+			// Build resolved context for the incremental review prompt (anti-ping-pong).
+			var resolvedCtx []ResolvedContext
+			for _, f := range fixed {
+				if f.Index >= 0 && f.Index < len(clanopyThreads) {
+					t := clanopyThreads[f.Index]
+					title := t.Body
+					if nl := strings.Index(title, "\n"); nl >= 0 {
+						title = title[:nl]
+					}
+					resolvedCtx = append(resolvedCtx, ResolvedContext{
+						Path:   t.Path,
+						Line:   t.Line,
+						Title:  title,
+						Reason: f.Reason,
+					})
+				}
+			}
+
+			if diffErr != nil {
+				// No incremental diff available — fall back to full review.
+				fbPlural := "s"
+				if len(unresolved) == 1 {
+					fbPlural = ""
+				}
+				fmt.Fprintf(os.Stderr, "Falling back to full review (%d known issue%s excluded)...\n", len(unresolved), fbPlural)
+				prompt = BuildPrompt(pr, cfg, startIndex)
+			} else {
+				// Scope file contents to only files in the incremental diff to
+				// prevent hallucinations about unrelated files from the full PR.
+				incFiles := FilesFromDiff(incrementalDiff)
+				incContents := make(map[string]string, len(incFiles))
+				for _, f := range incFiles {
+					if content, ok := pr.FileContents[f]; ok {
+						incContents[f] = content
+					}
+				}
+				plural := "s"
+				if len(unresolved) == 1 {
+					plural = ""
+				}
+				fmt.Fprintf(os.Stderr, "Reviewing new changes (%d known issue%s excluded)...\n", len(unresolved), plural)
+				prompt = BuildIncrementalPrompt(incrementalDiff, cfg, unresolved, opts.PRNumber, startIndex, incContents, incFiles, resolvedCtx)
+			}
 		}
 	} else {
 		// First review — full PR diff.
@@ -347,31 +356,34 @@ func Run(opts RunOptions) error {
 		return nil
 	}
 
-	// 6. Run Claude.
-	claudeOutput, err := runClaude(prompt, env, "")
-	if err != nil {
-		return err
-	}
-
-	// 7. Parse findings.
-	findings, err := ParseFindings(string(claudeOutput))
-	if err != nil {
-		return fmt.Errorf("parsing findings: %w", err)
-	}
-	// Safety net: drop findings on files not in the PR.
-	prFileSet := make(map[string]bool, len(pr.Files))
-	for _, f := range pr.Files {
-		prFileSet[f] = true
-	}
-	var filteredFindings []Finding
-	for _, f := range findings {
-		if f.File == "" || prFileSet[f.File] {
-			filteredFindings = append(filteredFindings, f)
-		} else {
-			fmt.Fprintf(os.Stderr, "Dropped finding on non-PR file: %s\n", f.File)
+	var findings []Finding
+	if !opts.ReplyOnly {
+		// 6. Run Claude.
+		claudeOutput, err := runClaude(prompt, env, "")
+		if err != nil {
+			return err
 		}
+
+		// 7. Parse findings.
+		findings, err = ParseFindings(string(claudeOutput))
+		if err != nil {
+			return fmt.Errorf("parsing findings: %w", err)
+		}
+		// Safety net: drop findings on files not in the PR.
+		prFileSet := make(map[string]bool, len(pr.Files))
+		for _, f := range pr.Files {
+			prFileSet[f] = true
+		}
+		var filteredFindings []Finding
+		for _, f := range findings {
+			if f.File == "" || prFileSet[f.File] {
+				filteredFindings = append(filteredFindings, f)
+			} else {
+				fmt.Fprintf(os.Stderr, "Dropped finding on non-PR file: %s\n", f.File)
+			}
+		}
+		findings = filteredFindings
 	}
-	findings = filteredFindings
 
 	if len(findings) == 0 {
 		fmt.Fprintf(os.Stderr, "No new findings\n")
@@ -391,8 +403,11 @@ func Run(opts RunOptions) error {
 	}
 
 	// 8b. Cache result for later use by `clanopy fix`.
-	if err := SaveResult(result); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to cache review result: %v\n", err)
+	// Skip in reply-only mode to avoid overwriting the existing cache with empty findings.
+	if !opts.ReplyOnly {
+		if err := SaveResult(result); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to cache review result: %v\n", err)
+		}
 	}
 
 	// 9. Format output.
