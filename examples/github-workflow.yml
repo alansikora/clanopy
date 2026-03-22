@@ -3,19 +3,49 @@ name: Clanopy Review
 on:
   pull_request:
     types: [opened, synchronize]
+  pull_request_review_comment:
+    types: [created]
 
 permissions:
   pull-requests: write
   contents: read
 
 jobs:
+  filter:
+    if: >-
+      github.event_name == 'pull_request' || (
+        github.event.comment.user.login != 'clanopy-review[bot]' &&
+        github.event.comment.in_reply_to_id
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      should_review: ${{ github.event_name == 'pull_request' || steps.check.outputs.is_clanopy_thread == 'true' }}
+    steps:
+      - name: Check if clanopy thread
+        id: check
+        if: github.event_name == 'pull_request_review_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY=$(gh api repos/${{ github.repository }}/pulls/comments/${{ github.event.comment.in_reply_to_id }} --jq '.body')
+          if echo "$BODY" | grep -q "clanopy fix"; then
+            echo "is_clanopy_thread=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_clanopy_thread=false" >> "$GITHUB_OUTPUT"
+          fi
+
   review:
+    needs: filter
+    if: needs.filter.outputs.should_review == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: alansikora/clanopy-review@v1
         with:
           # Use Claude access token (from /install-github-app)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Or use an API key instead:
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          reply_only: ${{ github.event_name == 'pull_request_review_comment' }}

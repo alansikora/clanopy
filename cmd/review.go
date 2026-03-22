@@ -30,6 +30,7 @@ var reviewCmd = &cobra.Command{
 		post, _ := cmd.Flags().GetBool("post")
 		configPath, _ := cmd.Flags().GetString("config")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		replyOnly, _ := cmd.Flags().GetBool("reply-only")
 
 		return review.Run(review.RunOptions{
 			Repo:       repo,
@@ -38,6 +39,7 @@ var reviewCmd = &cobra.Command{
 			Output:     output,
 			Post:       post,
 			DryRun:     dryRun,
+			ReplyOnly:  replyOnly,
 		})
 	},
 }
@@ -47,6 +49,7 @@ func init() {
 	reviewCmd.Flags().StringP("output", "o", "markdown", "Output format: markdown or json")
 	reviewCmd.Flags().Bool("post", false, "Post findings as a PR comment")
 	reviewCmd.Flags().StringP("config", "c", ".clanopy/review.yml", "Path to review config")
+	reviewCmd.Flags().Bool("reply-only", false, "Evaluate thread replies only, skip new findings")
 	reviewCmd.PersistentFlags().Bool("dry-run", false, "Show prompt without running Claude")
 	rootCmd.AddCommand(reviewCmd)
 }
