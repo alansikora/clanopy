@@ -254,6 +254,9 @@ func Run(opts RunOptions) error {
 		if len(clanopyThreads) > 0 {
 			botLogin = clanopyThreads[0].Author
 		}
+		if botLogin == "" {
+			fmt.Fprintf(os.Stderr, "Warning: could not determine bot login from thread author\n")
+		}
 		triaged := ClassifyThreads(clanopyThreads, reevalDiff, botLogin)
 
 		if opts.DryRun {
@@ -458,7 +461,9 @@ func Run(opts RunOptions) error {
 	}
 
 	// 11. Post review if requested.
-	if opts.Post {
+	// In reply-only mode, per-thread ack replies are posted earlier;
+	// skip top-level review comments, minimization, and all-clear posts.
+	if opts.Post && !opts.ReplyOnly {
 		// Step 5: Minimize ALL previous clanopy reviews where all inline
 		// findings are resolved. This runs before posting so the new
 		// message is always the final one on the timeline.
