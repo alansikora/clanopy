@@ -406,7 +406,6 @@ ignore:                       # Glob patterns for files reviewers should skip
   - "dist/**"
   - "*.lock"
 
-max_findings: 50              # Limit number of findings per review
 ` + "```" + `
 
 ## Severity definitions

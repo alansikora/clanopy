@@ -13,7 +13,6 @@ type ReviewConfig struct {
 	Rules        []Rule            `yaml:"rules"`
 	Context      string            `yaml:"context"`
 	Ignore       []string          `yaml:"ignore"`
-	MaxFindings  int               `yaml:"max_findings"`
 	MaxFileSize  int               `yaml:"max_file_size"`  // per-file content limit in bytes (default 100KB)
 	MaxTotalSize int               `yaml:"max_total_size"` // total file content limit in bytes (default 500KB)
 	Evaluation   *EvaluationConfig `yaml:"evaluation"`
