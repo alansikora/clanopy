@@ -67,11 +67,15 @@ type fixedThread struct {
 	Reason string // "code_change", "dismissed", "acknowledged", "rebutted", or "" for unknown
 }
 
-// allResolved checks if all clanopy threads have been resolved.
+// allResolved checks if all clanopy threads have been resolved by code changes.
+// Threads resolved by other reasons (dismissed, acknowledged, rebutted) are kept
+// open and do not count as resolved.
 func allResolved(threads []ReviewThread, fixed []fixedThread) bool {
 	fixedSet := make(map[int]bool, len(fixed))
 	for _, f := range fixed {
-		fixedSet[f.Index] = true
+		if f.Reason == "code_change" {
+			fixedSet[f.Index] = true
+		}
 	}
 	for i := range threads {
 		if !fixedSet[i] {
@@ -82,7 +86,9 @@ func allResolved(threads []ReviewThread, fixed []fixedThread) bool {
 }
 
 // resolvedFindingIDs builds the set of finding IDs that are resolved.
-// It combines threads already resolved on GitHub with threads just fixed by re-evaluation.
+// It combines threads already resolved on GitHub with threads just fixed by code changes.
+// Threads resolved by other reasons (dismissed, acknowledged, rebutted) are not included
+// since they are kept open for re-triage.
 func resolvedFindingIDs(allThreads, unresolved []ReviewThread, fixed []fixedThread) map[string]bool {
 	resolved := make(map[string]bool)
 	for _, t := range allThreads {
@@ -94,7 +100,9 @@ func resolvedFindingIDs(allThreads, unresolved []ReviewThread, fixed []fixedThre
 	}
 	fixedSet := make(map[int]bool, len(fixed))
 	for _, f := range fixed {
-		fixedSet[f.Index] = true
+		if f.Reason == "code_change" {
+			fixedSet[f.Index] = true
+		}
 	}
 	for i, t := range unresolved {
 		if fixedSet[i] {
@@ -266,16 +274,27 @@ func Run(opts RunOptions) error {
 				LogResolutions(triaged, resolutions)
 				fixed = toFixedThreads(resolutions)
 
-				// Resolve threads on GitHub.
+				// Resolve or acknowledge threads on GitHub.
 				for _, f := range fixed {
 					if f.Index >= 0 && f.Index < len(clanopyThreads) {
 						t := clanopyThreads[f.Index]
 						label := threadLabel(t)
-						if err := ResolveThread(t.ID); err != nil {
-							if strings.Contains(err.Error(), "Resource not accessible") {
-								fmt.Fprintf(os.Stderr, "  ~ %s (auto-resolve unavailable: token lacks permission)\n", label)
-							} else {
-								fmt.Fprintf(os.Stderr, "  ! %s — resolved, but failed to update thread: %v\n", label, err)
+						if f.Reason == "code_change" {
+							// Actually fixed — resolve on GitHub.
+							if err := ResolveThread(t.ID); err != nil {
+								if strings.Contains(err.Error(), "Resource not accessible") {
+									fmt.Fprintf(os.Stderr, "  ~ %s (auto-resolve unavailable: token lacks permission)\n", label)
+								} else {
+									fmt.Fprintf(os.Stderr, "  ! %s — resolved, but failed to update thread: %v\n", label, err)
+								}
+							}
+						} else {
+							// Not fixed by code — acknowledge but keep open for re-triage.
+							if !hasAcknowledgmentReply(t, f.Reason) {
+								msg := acknowledgmentMessage(f.Reason)
+								if err := ReplyToThread(t.ID, msg); err != nil {
+									fmt.Fprintf(os.Stderr, "  ! %s — failed to post acknowledgment: %v\n", label, err)
+								}
 							}
 						}
 					}
@@ -287,9 +306,12 @@ func Run(opts RunOptions) error {
 
 		if !opts.ReplyOnly {
 			// Phase 2: Build review prompt for new findings.
+			// Only code_change threads are truly resolved. Other reasons
+			// (dismissed, acknowledged, rebutted) stay in unresolved so they
+			// get re-triaged on future pushes.
 			fixedSet := make(map[int]bool, len(fixed))
 			for _, f := range fixed {
-				if f.Index >= 0 && f.Index < len(clanopyThreads) {
+				if f.Index >= 0 && f.Index < len(clanopyThreads) && f.Reason == "code_change" {
 					fixedSet[f.Index] = true
 				}
 			}
@@ -301,9 +323,11 @@ func Run(opts RunOptions) error {
 			}
 
 			// Build resolved context for the incremental review prompt (anti-ping-pong).
+			// Only code_change threads are added — acknowledged/dismissed/rebutted
+			// threads stay open and should be re-checked if related code changes.
 			var resolvedCtx []ResolvedContext
 			for _, f := range fixed {
-				if f.Index >= 0 && f.Index < len(clanopyThreads) {
+				if f.Index >= 0 && f.Index < len(clanopyThreads) && f.Reason == "code_change" {
 					t := clanopyThreads[f.Index]
 					title := t.Body
 					if nl := strings.Index(title, "\n"); nl >= 0 {
@@ -478,13 +502,13 @@ func Run(opts RunOptions) error {
 			fmt.Fprintf(os.Stderr, "All clear! No issues remaining.\n")
 		} else if len(clanopyThreads) > 0 {
 			// Re-review: some still unresolved, no new findings — nothing to post.
-			fixedSet := make(map[int]bool, len(fixed))
+			codeFixedSet := make(map[int]bool, len(fixed))
 			for _, f := range fixed {
-				if f.Index >= 0 && f.Index < len(clanopyThreads) {
-					fixedSet[f.Index] = true
+				if f.Index >= 0 && f.Index < len(clanopyThreads) && f.Reason == "code_change" {
+					codeFixedSet[f.Index] = true
 				}
 			}
-			unresolvedCount := len(clanopyThreads) - len(fixedSet)
+			unresolvedCount := len(clanopyThreads) - len(codeFixedSet)
 			fmt.Fprintf(os.Stderr, "No new findings. %d previous thread(s) still unresolved.\n", unresolvedCount)
 		} else {
 			// First review, no issues.
@@ -496,6 +520,33 @@ func Run(opts RunOptions) error {
 	}
 
 	return nil
+}
+
+// acknowledgmentMessage returns a reply body for non-code-change resolutions.
+// Each message includes a hidden HTML marker for dedup detection.
+func acknowledgmentMessage(reason string) string {
+	switch reason {
+	case "dismissed":
+		return "<!-- clanopy:ack:dismissed -->\nAuthor dismissed this finding. Keeping open \u2014 will re-check if related code changes."
+	case "acknowledged":
+		return "<!-- clanopy:ack:acknowledged -->\nAuthor acknowledged this finding. Keeping open \u2014 will re-check on future pushes."
+	case "rebutted":
+		return "<!-- clanopy:ack:rebutted -->\nAuthor provided a technical rebuttal. Keeping open \u2014 will re-check if related code changes."
+	default:
+		return "<!-- clanopy:ack:unknown -->\nFinding acknowledged. Keeping open \u2014 will re-check on future pushes."
+	}
+}
+
+// hasAcknowledgmentReply checks if a clanopy acknowledgment reply already exists
+// on the thread for the given reason, to avoid posting duplicate replies.
+func hasAcknowledgmentReply(t ReviewThread, reason string) bool {
+	marker := fmt.Sprintf("<!-- clanopy:ack:%s -->", reason)
+	for _, r := range t.Replies {
+		if strings.Contains(r.Body, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func setEnv(env []string, key, value string) []string {

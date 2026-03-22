@@ -411,11 +411,11 @@ func LogResolutions(triaged []TriagedThread, resolutions []ThreadResolution) {
 			case "code_change":
 				fmt.Fprintf(os.Stderr, "  [resolved] %s — fixed by code change\n", label)
 			case "dismissed":
-				fmt.Fprintf(os.Stderr, "  [resolved] %s — dismissed by author\n", label)
+				fmt.Fprintf(os.Stderr, "  [ack]      %s — dismissed by author (keeping open)\n", label)
 			case "acknowledged":
-				fmt.Fprintf(os.Stderr, "  [resolved] %s — acknowledged by author\n", label)
+				fmt.Fprintf(os.Stderr, "  [ack]      %s — acknowledged by author (keeping open)\n", label)
 			case "rebutted":
-				fmt.Fprintf(os.Stderr, "  [resolved] %s — rebutted by author\n", label)
+				fmt.Fprintf(os.Stderr, "  [ack]      %s — rebutted by author (keeping open)\n", label)
 			default:
 				fmt.Fprintf(os.Stderr, "  [resolved] %s — resolved\n", label)
 			}
