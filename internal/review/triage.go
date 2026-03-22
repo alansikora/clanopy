@@ -25,6 +25,7 @@ type TriagedThread struct {
 	Index    int                  // original index in the unresolved slice
 	Class    ThreadClassification
 	FileDiff string               // diff hunks for this file only (context for Claude)
+	BotLogin string               // login of the clanopy bot, for filtering replies
 }
 
 // ThreadResolution is the result of a per-thread Claude evaluation.
@@ -123,6 +124,7 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 			Index:    i,
 			Class:    class,
 			FileDiff: fileDiff,
+			BotLogin: botLogin,
 		}
 	}
 
@@ -223,7 +225,7 @@ func buildReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
 	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author replied.\n\n")
 
 	writeFinding(&b, t.Thread)
-	writeReplies(&b, t.Thread)
+	writeReplies(&b, t.Thread, t.BotLogin)
 
 	if ctx := evalContext(cfg, "reply"); ctx != "" {
 		fmt.Fprintf(&b, "## Additional Context\n%s\n\n", ctx)
@@ -246,7 +248,7 @@ func buildCodeChangeReplyPrompt(t TriagedThread, cfg *ReviewConfig) string {
 	b.WriteString("You are a code reviewer. You previously raised a finding on a pull request. The author pushed new code AND replied.\n\n")
 
 	writeFinding(&b, t.Thread)
-	writeReplies(&b, t.Thread)
+	writeReplies(&b, t.Thread, t.BotLogin)
 
 	b.WriteString("## Code Changes in This File\n```diff\n")
 	b.WriteString(t.FileDiff)
@@ -307,14 +309,15 @@ func writeFinding(b *strings.Builder, t ReviewThread) {
 // writeReplies writes the author replies section to the prompt.
 // Bot replies are filtered out so clanopy's own acknowledgment messages
 // don't leak into the Claude prompt and bias evaluation.
-func writeReplies(b *strings.Builder, t ReviewThread) {
+func writeReplies(b *strings.Builder, t ReviewThread, botLogin string) {
 	if len(t.Replies) == 0 {
 		return
 	}
-	// Filter out bot replies (t.Author == bot login for clanopy threads).
+	// Filter out bot replies using explicit botLogin, consistent with
+	// hasHumanReply and hasNewHumanReply.
 	var humanReplies []ThreadReply
 	for _, r := range t.Replies {
-		if r.Author != t.Author {
+		if r.Author != botLogin {
 			humanReplies = append(humanReplies, r)
 		}
 	}
