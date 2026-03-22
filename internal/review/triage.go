@@ -86,7 +86,7 @@ func ClassifyThreads(threads []ReviewThread, fullDiff, botLogin string) []Triage
 	result := make([]TriagedThread, len(threads))
 
 	for i, t := range threads {
-		hasReply := hasHumanReply(t, botLogin)
+		hasReply := hasNewHumanReply(t, botLogin)
 		outdated := t.Outdated
 
 		var class ThreadClassification
@@ -138,6 +138,37 @@ func fileInDiff(diff, path string) bool {
 // hasHumanReply checks if a thread has at least one reply from a non-bot author.
 func hasHumanReply(t ReviewThread, botLogin string) bool {
 	for _, r := range t.Replies {
+		if r.Author != botLogin {
+			return true
+		}
+	}
+	return false
+}
+
+// clanopyAckMarker is the prefix of HTML markers embedded in clanopy ack replies.
+const clanopyAckMarker = "<!-- clanopy:ack:"
+
+// isClanopyAckReply checks if a reply body contains a clanopy acknowledgment marker.
+func isClanopyAckReply(body string) bool {
+	return strings.Contains(body, clanopyAckMarker)
+}
+
+// hasNewHumanReply checks if a thread has a human reply AFTER the last clanopy
+// ack reply. If no ack reply exists, it falls back to hasHumanReply behavior.
+// Replies are in chronological order.
+func hasNewHumanReply(t ReviewThread, botLogin string) bool {
+	lastAckIdx := -1
+	for i, r := range t.Replies {
+		if r.Author == botLogin && isClanopyAckReply(r.Body) {
+			lastAckIdx = i
+		}
+	}
+	if lastAckIdx == -1 {
+		// No ack reply exists — fall back to standard check.
+		return hasHumanReply(t, botLogin)
+	}
+	// Check for human replies after the last ack.
+	for _, r := range t.Replies[lastAckIdx+1:] {
 		if r.Author != botLogin {
 			return true
 		}
@@ -274,12 +305,24 @@ func writeFinding(b *strings.Builder, t ReviewThread) {
 }
 
 // writeReplies writes the author replies section to the prompt.
+// Bot replies are filtered out so clanopy's own acknowledgment messages
+// don't leak into the Claude prompt and bias evaluation.
 func writeReplies(b *strings.Builder, t ReviewThread) {
 	if len(t.Replies) == 0 {
 		return
 	}
-	b.WriteString("## Author Replies\n")
+	// Filter out bot replies (t.Author == bot login for clanopy threads).
+	var humanReplies []ThreadReply
 	for _, r := range t.Replies {
+		if r.Author != t.Author {
+			humanReplies = append(humanReplies, r)
+		}
+	}
+	if len(humanReplies) == 0 {
+		return
+	}
+	b.WriteString("## Author Replies\n")
+	for _, r := range humanReplies {
 		normalizedBody := strings.ReplaceAll(r.Body, "\n", " ")
 		fmt.Fprintf(b, "> **@%s**: %s\n", r.Author, normalizedBody)
 	}
