@@ -50,11 +50,6 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int) string {
 		b.WriteString("\n")
 	}
 
-	// Max findings.
-	if cfg != nil && cfg.MaxFindings > 0 {
-		fmt.Fprintf(&b, "Limit your output to at most %d findings.\n\n", cfg.MaxFindings)
-	}
-
 	// Explicit allowlist of files in this diff.
 	if len(pr.Files) > 0 {
 		b.WriteString("## Files in This Diff\n")
@@ -196,11 +191,6 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 			fmt.Fprintf(&b, "- `%s`\n", pat)
 		}
 		b.WriteString("\n")
-	}
-
-	// Max findings.
-	if cfg != nil && cfg.MaxFindings > 0 {
-		fmt.Fprintf(&b, "Limit your output to at most %d findings.\n\n", cfg.MaxFindings)
 	}
 
 	// Known issues to avoid duplicating.

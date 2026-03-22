@@ -124,8 +124,6 @@ ignore:
   - "dist/**"
   - "*.lock"
 
-max_findings: 50
-
 # Optional: customize how re-evaluation prompts behave per type
 evaluation:
   code_change:
