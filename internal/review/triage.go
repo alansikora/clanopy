@@ -373,7 +373,7 @@ func EvaluateThreadsParallel(triaged []TriagedThread, env []string, cfg *ReviewC
 			defer func() { <-sem }()
 
 			prompt := BuildPerThreadPrompt(tt, cfg)
-			output, err := runClaude(prompt, env, model)
+			output, err := runClaude(prompt, env, model, 0, 0)
 			if err != nil {
 				results[idx] = ThreadResolution{Index: tt.Index, Error: err}
 				return
