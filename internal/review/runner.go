@@ -12,9 +12,6 @@ import (
 	"github.com/alansikora/clanopy/internal/config"
 )
 
-// defaultClaudeTimeout is the default maximum time to wait for a Claude invocation.
-const defaultClaudeTimeout = 5 * time.Minute
-
 // RunOptions configures a review run.
 type RunOptions struct {
 	Repo       string
@@ -48,10 +45,10 @@ func resolveEnv() []string {
 // runClaude executes Claude with the given prompt and environment.
 // When model is non-empty, it is passed via --model (e.g. "haiku", "sonnet").
 // When maxBudgetUSD is > 0, it is passed via --max-budget-usd.
-// When timeout is 0, defaults to 5 minutes.
+// When timeout is 0, defaults to EffectiveTimeout() (5 minutes).
 func runClaude(prompt string, env []string, model string, maxBudgetUSD float64, timeout time.Duration) ([]byte, error) {
 	if timeout <= 0 {
-		timeout = defaultClaudeTimeout
+		timeout = (*ReviewConfig)(nil).EffectiveTimeout()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
