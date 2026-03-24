@@ -66,6 +66,64 @@ clanopy review 42 --output json  # output as JSON
 clanopy review 42 --dry-run    # show the prompt without calling Claude
 ```
 
+### Features
+
+#### Incremental reviews
+
+On subsequent pushes, only the new diff is reviewed. Findings already raised are excluded from the prompt so Claude doesn't duplicate them. File contents are scoped to only files touched by the incremental diff.
+
+#### Thread lifecycle
+
+Each finding becomes a PR review thread. The lifecycle is fully managed:
+
+- **Code fix** — push a fix and the thread auto-resolves on GitHub
+- **Dismissal** — reply "dismiss this" and clanopy acknowledges and keeps the thread open for re-check
+- **Acknowledgment** — reply "intentional" or "will fix later" and clanopy confirms
+- **Rebuttal** — give a concrete technical reason and clanopy accepts it
+- **Cross-file fix** — fix the issue in a different file (e.g., the caller instead of the callee) and clanopy detects the relationship
+
+Only code fixes auto-resolve. Dismissals, acknowledgments, and rebuttals get a confirmation reply but stay open so they're re-checked on the next push.
+
+#### Reply evaluation
+
+When an author replies to a finding, clanopy evaluates the reply with a specialized prompt. It distinguishes between a genuine rebuttal ("this is safe because the input is already validated upstream"), an acknowledgment ("tracked in issue #42"), and vague disagreement that doesn't actually address the finding.
+
+#### Smart triage
+
+Before calling Claude, a Go-driven classifier checks each unresolved thread against the new diff and reply history. Threads where nothing changed and nobody replied are skipped entirely — zero Claude calls, zero cost.
+
+#### Parallel evaluation
+
+Threads that need re-evaluation each get a specialized prompt and run concurrently. Four prompt variants handle: code changes, author replies, both combined, and cross-file changes.
+
+#### Anti-hallucination guards
+
+Every prompt includes an explicit file allowlist — only files in the diff. Findings referencing other files are dropped. Line numbers are validated against actual diff hunks with a maximum distance threshold.
+
+#### Anti-ping-pong
+
+Resolved issues are injected as context in incremental review prompts with their resolution reason (code fix, dismissal, acknowledgment, rebuttal). Claude is instructed not to re-raise them or similar variants.
+
+#### Review minimization
+
+When all findings from a previous review are resolved, old review comments are automatically collapsed on GitHub to keep the PR timeline clean.
+
+#### Config generation
+
+`clanopy review init` analyzes your repo — languages, config files, CLAUDE.md, code samples, directory structure — and generates tailored review rules automatically. Falls back to a starter template if Claude is unavailable.
+
+#### Evaluation context
+
+Customize how re-evaluations behave per type. Inject project-specific instructions into code-change evaluations ("a fix without `errors.Wrap` is incomplete") or reply evaluations ("treat WONTFIX as acknowledgment").
+
+#### Inline comments
+
+Findings are posted as GitHub PR review comments at the exact line in the diff. When the finding's line is close to but not exactly on a diff line, it snaps to the nearest valid position.
+
+#### Prompt injection protection
+
+Repository content (code samples, CLAUDE.md, config) is escaped before inclusion in prompts to prevent adversarial content from injecting fake prompt sections.
+
 ### Re-reviews
 
 When reviewing a PR that already has clanopy findings, clanopy uses a **per-comment triage** system that maximizes determinism and minimizes Claude API costs:
@@ -162,8 +220,10 @@ No secrets to manage beyond Claude auth. The Clanopy Review app generates tokens
 # .github/workflows/clanopy-review.yml
 name: Clanopy Review
 on:
-  pull_request:
-    types: [opened, synchronize]
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  pull_request_review_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -171,16 +231,15 @@ permissions:
   pull-requests: write
 
 jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: alansikora/clanopy-review@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  pr:
+    uses: alansikora/clanopy-review/.github/workflows/review.yml@v1
+    with:
+      config_path: .clanopy/review.yml
+    secrets:
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-The `id-token: write` permission is required for the action to authenticate with the Clanopy Review app. The app must be installed on the repo — run `clanopy review init` to set everything up.
+`pull_request_target` is used instead of `pull_request` to support fork PRs. The `id-token: write` permission is required for OIDC-based authentication with the Clanopy Review app.
 
 See the [clanopy-review action repo](https://github.com/alansikora/clanopy-review) for all available inputs.
 
