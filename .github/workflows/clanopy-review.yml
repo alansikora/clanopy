@@ -11,7 +11,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  review:
+  pr:
     uses: alansikora/clanopy-review/.github/workflows/review.yml@v1
     with:
       config_path: .clanopy/review.yml
