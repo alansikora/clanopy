@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // MaxFindingDistance is the maximum number of lines a finding may be from the
@@ -905,13 +907,14 @@ func isSetupFile(path string) bool {
 }
 
 // matchesIgnore checks if a path matches any of the ignore glob patterns.
+// Uses doublestar to support ** recursive globs (e.g. "dist/**", "src/**/*.test.*").
 func matchesIgnore(path string, patterns []string) bool {
 	for _, pat := range patterns {
-		if matched, _ := filepath.Match(pat, path); matched {
+		if matched, _ := doublestar.Match(pat, path); matched {
 			return true
 		}
 		// Also try matching against just the filename.
-		if matched, _ := filepath.Match(pat, filepath.Base(path)); matched {
+		if matched, _ := doublestar.Match(pat, filepath.Base(path)); matched {
 			return true
 		}
 	}
