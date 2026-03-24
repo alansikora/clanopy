@@ -78,19 +78,17 @@ var reviewInitCmd = &cobra.Command{
 		workflowDir := filepath.Join(".github", "workflows")
 		workflowPath := filepath.Join(workflowDir, "clanopy-review.yml")
 
-		var authEnv string
+		var authSecret string
 		if useAPIKey {
-			authEnv = "          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}"
+			authSecret = "      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}"
 		} else {
-			authEnv = "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+			authSecret = "      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
 		}
-
-		actionRef := "v1"
 
 		workflow := fmt.Sprintf(`name: Clanopy Review
 on:
-  pull_request:
-    types: [opened, synchronize]
+  pull_request_target:
+    types: [opened, reopened, synchronize]
   pull_request_review_comment:
     types: [created]
 
@@ -100,44 +98,13 @@ permissions:
   pull-requests: write
 
 jobs:
-  filter:
-    if: >-
-      github.event_name == 'pull_request' || (
-        github.event.comment.user.login != 'clanopy-review[bot]' &&
-        github.event.comment.in_reply_to_id
-      )
-    runs-on: ubuntu-latest
-    outputs:
-      should_review: ${{ github.event_name == 'pull_request' || steps.check.outputs.is_clanopy_thread == 'true' }}
-    steps:
-      - name: Check if clanopy thread
-        id: check
-        if: github.event_name == 'pull_request_review_comment'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          BODY=$(gh api repos/${{ github.repository }}/pulls/comments/${{ github.event.comment.in_reply_to_id }} --jq '.body')
-          if echo "$BODY" | grep -q "clanopy fix"; then
-            echo "is_clanopy_thread=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_clanopy_thread=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  review:
-    needs: filter
-    if: needs.filter.outputs.should_review == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - uses: alansikora/clanopy-review@%s
-        with:
+  pr:
+    uses: alansikora/clanopy-review/.github/workflows/review.yml@v1
+    with:
+      config_path: .clanopy/review.yml
+    secrets:
 %s
-          config_path: .clanopy/review.yml
-          reply_only: ${{ github.event_name == 'pull_request_review_comment' }}
-`, actionRef, authEnv)
+`, authSecret)
 
 		if err := os.MkdirAll(workflowDir, 0755); err != nil {
 			return fmt.Errorf("creating workflow directory: %w", err)
