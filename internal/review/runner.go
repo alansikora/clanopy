@@ -48,7 +48,7 @@ func resolveEnv() []string {
 // When timeout is 0, defaults to EffectiveTimeout() (5 minutes).
 func runClaude(prompt string, env []string, model string, maxBudgetUSD float64, timeout time.Duration) ([]byte, error) {
 	if timeout <= 0 {
-		timeout = (*ReviewConfig)(nil).EffectiveTimeout()
+		timeout = (&ReviewConfig{}).EffectiveTimeout()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
