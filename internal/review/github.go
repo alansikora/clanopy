@@ -412,8 +412,8 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 
 	cmd := exec.Command("gh", "api", "graphql",
 		"-f", "query="+query,
-		"-f", "owner="+owner,
-		"-f", "name="+name,
+		"-f", fmt.Sprintf("owner=%s", owner),
+		"-f", fmt.Sprintf("name=%s", name),
 		"-F", fmt.Sprintf("pr=%d", prNumber),
 	)
 	out, err := cmd.Output()
@@ -465,7 +465,7 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 func ResolveThread(threadID string) error {
 	cmd := exec.Command("gh", "api", "graphql",
 		"-f", "query=mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}",
-		"-f", "threadId="+threadID,
+		"-f", fmt.Sprintf("threadId=%s", threadID),
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh api graphql resolve: %w\n%s", err, string(out))
@@ -477,8 +477,8 @@ func ResolveThread(threadID string) error {
 func ReplyToThread(threadID, body string) error {
 	cmd := exec.Command("gh", "api", "graphql",
 		"-f", "query=mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}",
-		"-f", "threadId="+threadID,
-		"-f", "body="+body,
+		"-f", fmt.Sprintf("threadId=%s", threadID),
+		"-f", fmt.Sprintf("body=%s", body),
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh api graphql reply: %w\n%s", err, string(out))
