@@ -394,23 +394,28 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 	}
 	owner, name := parts[0], parts[1]
 
-	query := fmt.Sprintf(`{
-  repository(owner: "%s", name: "%s") {
-    pullRequest(number: %d) {
-      reviewThreads(first: 100) {
-        nodes {
+	query := `query($owner:String!,$name:String!,$pr:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$pr){
+      reviewThreads(first:100){
+        nodes{
           id
           isResolved
-          comments(first: 100) {
-            nodes { body path line outdated author { login } }
+          comments(first:100){
+            nodes{body path line outdated author{login}}
           }
         }
       }
     }
   }
-}`, owner, name, prNumber)
+}`
 
-	cmd := exec.Command("gh", "api", "graphql", "-f", "query="+query)
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query="+query,
+		"-f", fmt.Sprintf("owner=%s", owner),
+		"-f", fmt.Sprintf("name=%s", name),
+		"-F", fmt.Sprintf("pr=%d", prNumber),
+	)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh api graphql: %w", err)
@@ -458,8 +463,10 @@ func FetchReviewThreads(repo string, prNumber int) ([]ReviewThread, error) {
 
 // ResolveThread resolves a review thread via GraphQL mutation.
 func ResolveThread(threadID string) error {
-	query := fmt.Sprintf(`mutation { resolveReviewThread(input: { threadId: "%s" }) { thread { isResolved } } }`, threadID)
-	cmd := exec.Command("gh", "api", "graphql", "-f", "query="+query)
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query=mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}",
+		"-f", fmt.Sprintf("threadId=%s", threadID),
+	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh api graphql resolve: %w\n%s", err, string(out))
 	}
@@ -470,8 +477,8 @@ func ResolveThread(threadID string) error {
 func ReplyToThread(threadID, body string) error {
 	cmd := exec.Command("gh", "api", "graphql",
 		"-f", "query=mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}",
-		"-f", "threadId="+threadID,
-		"-f", "body="+body,
+		"-f", fmt.Sprintf("threadId=%s", threadID),
+		"-f", fmt.Sprintf("body=%s", body),
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh api graphql reply: %w\n%s", err, string(out))
