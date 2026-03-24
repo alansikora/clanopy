@@ -82,7 +82,7 @@ func BuildPrompt(pr *PRData, cfg *ReviewConfig, startIndex int) string {
 	b.WriteString("  - \"nitpick\": Minor style, naming, formatting.\n")
 	b.WriteString("- `title` (string): A short title for the finding.\n")
 	b.WriteString("- `description` (string): A detailed explanation of the issue.\n")
-	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement.\n")
+	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement. For suggestions about broader patterns, structural concerns, or improvements that go beyond the scope of the current PR, recommend that the author discuss with the team or open a separate PR — do not imply they should fix it in this PR.\n")
 	first := startIndex + 1
 	fmt.Fprintf(&b, "- `fix_ref` (string): A reference ID in the format `%d-<index>` where index starts at %d (e.g. `%d-%d`, `%d-%d`).\n", pr.Number, first, pr.Number, first, pr.Number, first+1)
 	b.WriteString("\n**IMPORTANT — JSON escaping:** When your description or suggestion references code containing backslash sequences (e.g. `\\n`, `\\t`, `\\\"`), you MUST double-escape the backslash in the JSON string value. For example, to mention `fmt.Print(\"\\n\")` in a JSON string, write `fmt.Print(\"\\\\n\")`. A single `\\n` in JSON is a newline character, not the literal text `\\n`.\n")
@@ -250,7 +250,7 @@ func BuildIncrementalPrompt(diff string, cfg *ReviewConfig, knownIssues []Review
 	b.WriteString("  - \"nitpick\": Minor style, naming, formatting.\n")
 	b.WriteString("- `title` (string): A short title for the finding.\n")
 	b.WriteString("- `description` (string): A detailed explanation of the issue.\n")
-	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement.\n")
+	b.WriteString("- `suggestion` (string, optional): A suggested fix or improvement. For suggestions about broader patterns, structural concerns, or improvements that go beyond the scope of the current PR, recommend that the author discuss with the team or open a separate PR — do not imply they should fix it in this PR.\n")
 	first := startIndex + 1
 	fmt.Fprintf(&b, "- `fix_ref` (string): A reference ID in the format `%d-<index>` where index starts at %d (e.g. `%d-%d`, `%d-%d`).\n", prNumber, first, prNumber, first, prNumber, first+1)
 	b.WriteString("\n**IMPORTANT — JSON escaping:** When your description or suggestion references code containing backslash sequences (e.g. `\\n`, `\\t`, `\\\"`), you MUST double-escape the backslash in the JSON string value. For example, to mention `fmt.Print(\"\\n\")` in a JSON string, write `fmt.Print(\"\\\\n\")`. A single `\\n` in JSON is a newline character, not the literal text `\\n`.\n")
