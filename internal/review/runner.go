@@ -1,11 +1,13 @@
 package review
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/alansikora/clanopy/internal/config"
 )
@@ -42,16 +44,30 @@ func resolveEnv() []string {
 
 // runClaude executes Claude with the given prompt and environment.
 // When model is non-empty, it is passed via --model (e.g. "haiku", "sonnet").
-func runClaude(prompt string, env []string, model string) ([]byte, error) {
+// When maxBudgetUSD is > 0, it is passed via --max-budget-usd.
+// When timeout is 0, defaults to EffectiveTimeout() (5 minutes).
+func runClaude(prompt string, env []string, model string, maxBudgetUSD float64, timeout time.Duration) ([]byte, error) {
+	if timeout <= 0 {
+		timeout = (&ReviewConfig{}).EffectiveTimeout()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	args := []string{"--print", "--no-session-persistence"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
-	cmd := exec.Command("claude", args...)
+	if maxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", maxBudgetUSD))
+	}
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Env = env
 	cmd.Stdin = strings.NewReader(prompt)
 	output, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("claude timed out after %s", timeout)
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return nil, fmt.Errorf("claude failed: %s\n%s", string(exitErr.Stderr), string(output))
@@ -386,7 +402,7 @@ func Run(opts RunOptions) error {
 	var findings []Finding
 	if !opts.ReplyOnly {
 		// 6. Run Claude.
-		claudeOutput, err := runClaude(prompt, env, "")
+		claudeOutput, err := runClaude(prompt, env, "", cfg.MaxBudgetUSD, cfg.EffectiveTimeout())
 		if err != nil {
 			return err
 		}

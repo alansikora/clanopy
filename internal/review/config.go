@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,6 +16,8 @@ type ReviewConfig struct {
 	Ignore       []string          `yaml:"ignore"`
 	MaxFileSize  int               `yaml:"max_file_size"`  // per-file content limit in bytes (default 100KB)
 	MaxTotalSize int               `yaml:"max_total_size"` // total file content limit in bytes (default 500KB)
+	MaxBudgetUSD float64           `yaml:"max_budget_usd"`  // per-invocation spending limit in USD (default 0 = unlimited)
+	TimeoutMins  int               `yaml:"timeout_minutes"` // per-invocation timeout in minutes (default 5)
 	Evaluation   *EvaluationConfig `yaml:"evaluation"`
 }
 
@@ -43,6 +46,14 @@ func (c *ReviewConfig) EffectiveMaxTotalSize() int {
 		return c.MaxTotalSize
 	}
 	return 500 * 1024
+}
+
+// EffectiveTimeout returns the per-invocation timeout, defaulting to 5 minutes.
+func (c *ReviewConfig) EffectiveTimeout() time.Duration {
+	if c != nil && c.TimeoutMins > 0 {
+		return time.Duration(c.TimeoutMins) * time.Minute
+	}
+	return 5 * time.Minute
 }
 
 type Rule struct {

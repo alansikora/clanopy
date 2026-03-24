@@ -474,7 +474,7 @@ func Generate() (string, error) {
 	prompt := buildGeneratePrompt(info)
 	env := resolveEnv()
 
-	output, err := runClaude(prompt, env, "")
+	output, err := runClaude(prompt, env, "", 0, 0)
 	if err != nil {
 		return "", fmt.Errorf("running Claude: %w", err)
 	}
