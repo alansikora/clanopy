@@ -1,6 +1,6 @@
 # clanopy
 
-The canopy over your Claude Code. A toolkit for workspaces, reviews, and workflows.
+The canopy over your Claude Code. A toolkit for workspaces and workflows.
 
 ## Project structure
 
